@@ -1,3 +1,32 @@
+/*
+All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All rights reserved.
+All other contributions:
+Copyright (c) 2014--2018, the respective contributors
+All rights reserved.
+For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+    * Redistributions of source code must retain the above copyright notice,
+      this list of conditions and the following disclaimer.
+    * Redistributions in binary form must reproduce the above copyright
+      notice, this list of conditions and the following disclaimer in the
+      documentation and/or other materials provided with the distribution.
+    * Neither the name of Intel Corporation nor the names of its contributors
+      may be used to endorse or promote products derived from this software
+      without specific prior written permission.
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+*/
+
 #include "gtest/gtest.h"
 
 #include "caffe/common.hpp"
@@ -10,7 +39,7 @@ namespace caffe {
 
 class CommonTest : public ::testing::Test {};
 
-#ifndef CPU_ONLY  // GPU Caffe singleton test.
+#ifdef USE_CUDA  // GPU Caffe singleton test.
 
 TEST_F(CommonTest, TestCublasHandlerGPU) {
   int cuda_device_id;
@@ -25,7 +54,57 @@ TEST_F(CommonTest, TestBrewMode) {
   EXPECT_EQ(Caffe::mode(), Caffe::CPU);
   Caffe::set_mode(Caffe::GPU);
   EXPECT_EQ(Caffe::mode(), Caffe::GPU);
+#ifdef USE_MLU
+  Caffe::set_mode(Caffe::MLU);
+  EXPECT_EQ(Caffe::mode(), Caffe::MLU);
+  Caffe::set_mode(Caffe::MFUS);
+  EXPECT_EQ(Caffe::mode(), Caffe::MFUS);
+#endif
 }
+
+#ifdef USE_MLU
+TEST_F(CommonTest, TestReshapeMode) {
+  Caffe::setReshapeMode(Caffe::ReshapeMode::SETUPONLY);
+  EXPECT_EQ(Caffe::reshapeMode(), Caffe::ReshapeMode::SETUPONLY);
+  Caffe::setReshapeMode("SETUPONLY");
+  EXPECT_EQ(Caffe::reshapeMode(), Caffe::ReshapeMode::SETUPONLY);
+  Caffe::setReshapeMode(Caffe::ReshapeMode::ALWAYS);
+  EXPECT_EQ(Caffe::reshapeMode(), Caffe::ReshapeMode::ALWAYS);
+  Caffe::setReshapeMode("ALWAYS");
+  EXPECT_EQ(Caffe::reshapeMode(), Caffe::ReshapeMode::ALWAYS);
+}
+
+TEST_F(CommonTest, TestMLUCore) {
+  Caffe::set_rt_core("1H8");
+  EXPECT_EQ(Caffe::rt_core(), CNML_1H8);
+  Caffe::set_rt_core(CNML_1H8);
+  EXPECT_EQ(Caffe::rt_core(), CNML_1H8);
+  Caffe::set_rt_core("1H16");
+  EXPECT_EQ(Caffe::rt_core(), CNML_1H16);
+  Caffe::set_rt_core(CNML_1H16);
+  EXPECT_EQ(Caffe::rt_core(), CNML_1H16);
+  Caffe::set_rt_core("MLU100");
+  EXPECT_EQ(Caffe::rt_core(), CNML_C10);
+  Caffe::set_rt_core(CNML_C10);
+  EXPECT_EQ(Caffe::rt_core(), CNML_C10);
+}
+
+TEST_F(CommonTest, TestMLUStream) {
+  cnmlInit(0);
+  Caffe::set_mlu_device(0);
+  EXPECT_NE(Caffe::queue(), nullptr);
+  Caffe::freeQueue();
+  cnmlExit();
+}
+
+TEST_F(CommonTest, TestMLUDataParallel) {
+  Caffe::setDataParallel(3);
+  EXPECT_EQ(Caffe::data_parallel(), 3);
+  Caffe::setModelParallel(5);
+  EXPECT_EQ(Caffe::model_parallel(), 5);
+}
+#endif
+
 
 TEST_F(CommonTest, TestRandSeedCPU) {
   SyncedMemory data_a(10 * sizeof(int));
@@ -42,7 +121,7 @@ TEST_F(CommonTest, TestRandSeedCPU) {
   }
 }
 
-#ifndef CPU_ONLY  // GPU Caffe singleton test.
+#ifdef USE_CUDA  // GPU Caffe singleton test.
 
 TEST_F(CommonTest, TestRandSeedGPU) {
   SyncedMemory data_a(10 * sizeof(unsigned int));

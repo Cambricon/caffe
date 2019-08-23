@@ -1,6 +1,35 @@
+/*
+All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All rights reserved.
+All other contributions:
+Copyright (c) 2014--2018, the respective contributors
+All rights reserved.
+For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+    * Redistributions of source code must retain the above copyright notice,
+      this list of conditions and the following disclaimer.
+    * Redistributions in binary form must reproduce the above copyright
+      notice, this list of conditions and the following disclaimer in the
+      documentation and/or other materials provided with the distribution.
+    * Neither the name of Intel Corporation nor the names of its contributors
+      may be used to endorse or promote products derived from this software
+      without specific prior written permission.
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+*/
+
+#ifndef INCLUDE_CAFFE_UTIL_DB_LEVELDB_HPP_
+#define INCLUDE_CAFFE_UTIL_DB_LEVELDB_HPP_
 #ifdef USE_LEVELDB
-#ifndef CAFFE_UTIL_DB_LEVELDB_HPP
-#define CAFFE_UTIL_DB_LEVELDB_HPP
 
 #include <string>
 
@@ -12,7 +41,7 @@
 namespace caffe { namespace db {
 
 class LevelDBCursor : public Cursor {
- public:
+  public:
   explicit LevelDBCursor(leveldb::Iterator* iter)
     : iter_(iter) {
     SeekToFirst();
@@ -25,12 +54,12 @@ class LevelDBCursor : public Cursor {
   virtual string value() { return iter_->value().ToString(); }
   virtual bool valid() { return iter_->Valid(); }
 
- private:
+  private:
   leveldb::Iterator* iter_;
 };
 
 class LevelDBTransaction : public Transaction {
- public:
+  public:
   explicit LevelDBTransaction(leveldb::DB* db) : db_(db) { CHECK_NOTNULL(db_); }
   virtual void Put(const string& key, const string& value) {
     batch_.Put(key, value);
@@ -41,7 +70,7 @@ class LevelDBTransaction : public Transaction {
                        << std::endl << status.ToString();
   }
 
- private:
+  private:
   leveldb::DB* db_;
   leveldb::WriteBatch batch_;
 
@@ -49,7 +78,7 @@ class LevelDBTransaction : public Transaction {
 };
 
 class LevelDB : public DB {
- public:
+  public:
   LevelDB() : db_(NULL) { }
   virtual ~LevelDB() { Close(); }
   virtual void Open(const string& source, Mode mode);
@@ -66,7 +95,7 @@ class LevelDB : public DB {
     return new LevelDBTransaction(db_);
   }
 
- private:
+  private:
   leveldb::DB* db_;
 };
 
@@ -74,5 +103,5 @@ class LevelDB : public DB {
 }  // namespace db
 }  // namespace caffe
 
-#endif  // CAFFE_UTIL_DB_LEVELDB_HPP
 #endif  // USE_LEVELDB
+#endif  // INCLUDE_CAFFE_UTIL_DB_LEVELDB_HPP_

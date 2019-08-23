@@ -19,7 +19,7 @@ inline __device__
 double caffe_gpu_atomic_add(const double val, double* address) {
   unsigned long long int* address_as_ull =  // NOLINT(runtime/int)
       // NOLINT_NEXT_LINE(runtime/int)
-      reinterpret_cast<unsigned long long int*>(address);
+      reinterpret_cast<unsigned long long int*>(address); // NOLINT
   unsigned long long int old = *address_as_ull;  // NOLINT(runtime/int)
   unsigned long long int assumed;  // NOLINT(runtime/int)
   do {

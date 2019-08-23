@@ -1,11 +1,42 @@
-#ifndef CAFFE_DATA_TRANSFORMER_HPP
-#define CAFFE_DATA_TRANSFORMER_HPP
+/*
+All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All rights reserved.
+All other contributions:
+Copyright (c) 2014--2018, the respective contributors
+All rights reserved.
+For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+    * Redistributions of source code must retain the above copyright notice,
+      this list of conditions and the following disclaimer.
+    * Redistributions in binary form must reproduce the above copyright
+      notice, this list of conditions and the following disclaimer in the
+      documentation and/or other materials provided with the distribution.
+    * Neither the name of Intel Corporation nor the names of its contributors
+      may be used to endorse or promote products derived from this software
+      without specific prior written permission.
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+*/
+
+#ifndef INCLUDE_CAFFE_DATA_TRANSFORMER_HPP_
+#define INCLUDE_CAFFE_DATA_TRANSFORMER_HPP_
 
 #include <vector>
 
 #include "caffe/blob.hpp"
 #include "caffe/common.hpp"
 #include "caffe/proto/caffe.pb.h"
+
+using google::protobuf::RepeatedPtrField;
 
 namespace caffe {
 
@@ -15,7 +46,7 @@ namespace caffe {
  */
 template <typename Dtype>
 class DataTransformer {
- public:
+  public:
   explicit DataTransformer(const TransformationParameter& param, Phase phase);
   virtual ~DataTransformer() {}
 
@@ -47,8 +78,65 @@ class DataTransformer {
    *    This is destination blob. It can be part of top blob's data if
    *    set_cpu_data() is used. See memory_layer.cpp for an example.
    */
-  void Transform(const vector<Datum> & datum_vector,
-                Blob<Dtype>* transformed_blob);
+  void Transform(const vector<Datum>& datum_vector,
+                 Blob<Dtype>* transformed_blob);
+
+  /**
+     * @brief Applies the transformation defined in the data layer's
+     * transform_param block to the annotated data.
+     *
+     * @param anno_datum
+     *    AnnotatedDatum containing the data and annotation to be transformed.
+     * @param transformed_blob
+     *    This is destination blob. It can be part of top blob's data if
+     *    set_cpu_data() is used. See annotated_data_layer.cpp for an example.
+     * @param transformed_anno_vec
+     *    This is destination annotation.
+     */
+  void Transform(const AnnotatedDatum& anno_datum,
+                 Blob<Dtype>* transformed_blob,
+                 RepeatedPtrField<AnnotationGroup>* transformed_anno_vec);
+  void Transform(const AnnotatedDatum& anno_datum,
+                 Blob<Dtype>* transformed_blob,
+                 RepeatedPtrField<AnnotationGroup>* transformed_anno_vec,
+                 bool* do_mirror);
+  void Transform(const AnnotatedDatum& anno_datum,
+                 Blob<Dtype>* transformed_blob,
+                 vector<AnnotationGroup>* transformed_anno_vec,
+                 bool* do_mirror);
+  void Transform(const AnnotatedDatum& anno_datum,
+                 Blob<Dtype>* transformed_blob,
+                 vector<AnnotationGroup>* transformed_anno_vec);
+
+  /**
+   * @brief Transform the annotation according to the transformation applied
+   * to the datum.
+   *
+   * @param anno_datum
+   *    AnnotatedDatum containing the data and annotation to be transformed.
+   * @param crop_bbox
+   *    The cropped region applied to anno_datum.datum()
+   * @param do_mirror
+   *    If true, meaning the datum has mirrored.
+   * @param transformed_anno_group_all
+   *    Stores all transformed AnnotationGroup.
+   */
+  void TransformAnnotation(
+      const AnnotatedDatum& anno_datum, const NormalizedBBox& crop_bbox,
+      const bool do_mirror,
+      RepeatedPtrField<AnnotationGroup>* transformed_anno_group_all);
+
+  /**
+   * @brief Crops the datum according to bbox.
+   */
+  void CropImage(const Datum& datum, const NormalizedBBox& bbox,
+                 Datum* crop_datum);
+
+  /**
+   * @brief Crops the datum and AnnotationGroup according to bbox.
+   */
+  void CropImage(const AnnotatedDatum& anno_datum, const NormalizedBBox& bbox,
+                 AnnotatedDatum* cropped_anno_datum);
 
 #ifdef USE_OPENCV
   /**
@@ -61,8 +149,8 @@ class DataTransformer {
    *    This is destination blob. It can be part of top blob's data if
    *    set_cpu_data() is used. See memory_layer.cpp for an example.
    */
-  void Transform(const vector<cv::Mat> & mat_vector,
-                Blob<Dtype>* transformed_blob);
+  void Transform(const vector<cv::Mat>& mat_vector,
+                 Blob<Dtype>* transformed_blob);
 
   /**
    * @brief Applies the transformation defined in the data layer's
@@ -74,7 +162,20 @@ class DataTransformer {
    *    This is destination blob. It can be part of top blob's data if
    *    set_cpu_data() is used. See image_data_layer.cpp for an example.
    */
+  void Transform(const cv::Mat& cv_img, Blob<Dtype>* transformed_blob,
+                 NormalizedBBox* crop_bbox, bool* do_mirror);
   void Transform(const cv::Mat& cv_img, Blob<Dtype>* transformed_blob);
+
+  /**
+   * @brief Crops img according to bbox.
+   */
+  void CropImage(const cv::Mat& img, const NormalizedBBox& bbox,
+                 cv::Mat* crop_img);
+
+  void TransformInv(const Blob<Dtype>* blob, vector<cv::Mat>* cv_imgs);
+  void TransformInv(const Dtype* data, cv::Mat* cv_img, const int height,
+                    const int width, const int channels);
+
 #endif  // USE_OPENCV
 
   /**
@@ -106,17 +207,17 @@ class DataTransformer {
    * @param datum_vector
    *    A vector of Datum containing the data to be transformed.
    */
-  vector<int> InferBlobShape(const vector<Datum> & datum_vector);
-  /**
-   * @brief Infers the shape of transformed_blob will have when
-   *    the transformation is applied to the data.
-   *    It uses the first element to infer the shape of the blob.
-   *
-   * @param mat_vector
-   *    A vector of Mat containing the data to be transformed.
-   */
+  vector<int> InferBlobShape(const vector<Datum>& datum_vector);
+/**
+ * @brief Infers the shape of transformed_blob will have when
+ *    the transformation is applied to the data.
+ *    It uses the first element to infer the shape of the blob.
+ *
+ * @param mat_vector
+ *    A vector of Mat containing the data to be transformed.
+ */
 #ifdef USE_OPENCV
-  vector<int> InferBlobShape(const vector<cv::Mat> & mat_vector);
+  vector<int> InferBlobShape(const vector<cv::Mat>& mat_vector);
   /**
    * @brief Infers the shape of transformed_blob will have when
    *    the transformation is applied to the data.
@@ -127,21 +228,30 @@ class DataTransformer {
   vector<int> InferBlobShape(const cv::Mat& cv_img);
 #endif  // USE_OPENCV
 
- protected:
-   /**
-   * @brief Generates a random integer from Uniform({0, 1, ..., n-1}).
-   *
-   * @param n
-   *    The upperbound (exclusive) value of the random number.
-   * @return
-   *    A uniformly random integer value from ({0, 1, ..., n-1}).
-   */
+  protected:
+  /**
+  * @brief Generates a random integer from Uniform({0, 1, ..., n-1}).
+  *
+  * @param n
+  *    The upperbound (exclusive) value of the random number.
+  * @return
+  *    A uniformly random integer value from ({0, 1, ..., n-1}).
+  */
   virtual int Rand(int n);
-
+  // Transform and return the transformation information.
+  void Transform(const Datum& datum, Dtype* transformed_data,
+                 NormalizedBBox* crop_bbox, bool* do_mirror);
   void Transform(const Datum& datum, Dtype* transformed_data);
+
+  /**
+   * @brief Applies the transformation defined in the data layer's
+   * transform_param block to the data and return transform information.
+   */
+  void Transform(const Datum& datum, Blob<Dtype>* transformed_blob,
+                 NormalizedBBox* crop_bbox, bool* do_mirror);
+
   // Tranformation parameters
   TransformationParameter param_;
-
 
   shared_ptr<Caffe::RNG> rng_;
   Phase phase_;
@@ -151,4 +261,4 @@ class DataTransformer {
 
 }  // namespace caffe
 
-#endif  // CAFFE_DATA_TRANSFORMER_HPP_
+#endif  // INCLUDE_CAFFE_DATA_TRANSFORMER_HPP_

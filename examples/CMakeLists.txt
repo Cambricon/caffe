@@ -1,32 +1,14 @@
-file(GLOB_RECURSE examples_srcs "${PROJECT_SOURCE_DIR}/examples/*.cpp")
+cmake_minimum_required(VERSION 2.8.7)
 
-foreach(source_file ${examples_srcs})
-  # get file name
-  get_filename_component(name ${source_file} NAME_WE)
-    
-  # get folder name
-  get_filename_component(path ${source_file} PATH)
-  get_filename_component(folder ${path} NAME_WE)
-    
-  add_executable(${name} ${source_file})
-  target_link_libraries(${name} ${Caffe_LINK})
-  caffe_default_properties(${name})
+set(Caffe_ALL_DEFINITIONS ${Caffe_DEFINITIONS})
+list(REMOVE_ITEM Caffe_ALL_DEFINITIONS PRIVATE PUBLIC)
+add_definitions(${Caffe_ALL_DEFINITIONS})
 
-  # set back RUNTIME_OUTPUT_DIRECTORY
-  set_target_properties(${name} PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/examples/${folder}")
-
-  caffe_set_solution_folder(${name} examples)
-
-  # install
-  install(TARGETS ${name} DESTINATION ${CMAKE_INSTALL_BINDIR})
-
-
-  if(UNIX OR APPLE)
-    # Funny command to make tutorials work
-    # TODO: remove in future as soon as naming is standardized everywhere
-    set(__outname ${PROJECT_BINARY_DIR}/examples/${folder}/${name}${Caffe_POSTFIX})
-    add_custom_command(TARGET ${name} POST_BUILD
-                       COMMAND ln -sf "${__outname}" "${__outname}.bin")
-  endif()
-endforeach()
+add_subdirectory(clas_offline_multicore)
+add_subdirectory(clas_online_multicore)
+add_subdirectory(clas_online_singlecore)
+add_subdirectory(clas_offline_singlecore)
+add_subdirectory(ssd)
+add_subdirectory(yolo_v2)
+add_subdirectory(yolo_v3)
+add_subdirectory(common)

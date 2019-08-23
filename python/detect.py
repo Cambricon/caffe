@@ -1,3 +1,33 @@
+#-*- coding: utf-8 -*-
+"""
+All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All rights reserved.
+All other contributions:
+Copyright (c) 2014--2018, the respective contributors
+All rights reserved.
+For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+    * Redistributions of source code must retain the above copyright notice,
+      this list of conditions and the following disclaimer.
+    * Redistributions in binary form must reproduce the above copyright
+      notice, this list of conditions and the following disclaimer in the
+      documentation and/or other materials provided with the distribution.
+    * Neither the name of Intel Corporation nor the names of its contributors
+      may be used to endorse or promote products derived from this software
+      without specific prior written permission.
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+"""
+
 #!/usr/bin/env python
 """
 detector.py is an out-of-the-box windowed detector
@@ -26,6 +56,7 @@ import caffe
 CROP_MODES = ['list', 'selective_search']
 COORD_COLS = ['ymin', 'xmin', 'ymax', 'xmax']
 
+MLUInited = 0
 
 def main(argv):
     pycaffe_dir = os.path.dirname(__file__)
@@ -65,6 +96,16 @@ def main(argv):
         "--gpu",
         action='store_true',
         help="Switch for gpu computation."
+    )
+    parser.add_argument(
+        "--mlu",
+        action='store_true',
+        help="Switch for MLU computation."
+    )
+    parser.add_argument(
+        "--mfus",
+        action='store_true',
+        help="Switch for MFUS (MLU Fusion) computation."
     )
     parser.add_argument(
         "--mean_file",
@@ -110,6 +151,14 @@ def main(argv):
     if args.gpu:
         caffe.set_mode_gpu()
         print("GPU mode")
+    elif args.mlu:
+        caffe.set_mode_mlu()
+        MLUInited = 1
+        print("MLU mode")
+    elif args.mfus:
+        caffe.set_mode_mfus()
+        MLUInited = 1
+        print("MFUS mode")
     else:
         caffe.set_mode_cpu()
         print("CPU mode")
@@ -167,7 +216,10 @@ def main(argv):
     print("Saved to {} in {:.3f} s.".format(args.output_file,
                                             time.time() - t))
 
-
 if __name__ == "__main__":
     import sys
     main(sys.argv)
+    # The call to exit mlu lib should happen after Caffe object has been
+    # destructed. In this case, object is in main function.
+    if MLUInited == 1 :
+        caffe.exit_mlu_lib()

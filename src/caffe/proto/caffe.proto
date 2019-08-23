@@ -2,6 +2,38 @@ syntax = "proto2";
 
 package caffe;
 
+// BaseDataType should match with cnmlDataType_t in cnml.h
+enum BaseDataType {
+  option allow_alias = true;
+  DT_INVALID = 0;
+  DT_FLOAT16 = 1;
+  DT_FLOAT32 = 2;
+  DT_DOUBLE = 3;
+  DT_INT8 = 4;
+  DT_FIX8 = 4;
+  DT_UINT8 = 6;
+  DT_INT16 = 7;
+  DT_INT32 = 8;
+  DT_QUANT8 = 9;
+  DT_BINARY = 10;
+}
+
+enum Engine{
+  DEFAULT = 0;
+  CAFFE = 1;
+  CUDNN = 2 ;
+  MLU = 3;
+}
+
+
+message BlobDataType {
+  optional BaseDataType type = 1 [default = DT_FLOAT16];
+  // optional int32 position = 2 [default = 0];
+  // optional float scale = 3 [default = 1];
+  repeated int32 position = 2 ;
+  repeated float scale = 3 ;
+}
+
 // Specifies the shape (dimensions) of a Blob.
 message BlobShape {
   repeated int64 dim = 1 [packed = true];
@@ -19,6 +51,7 @@ message BlobProto {
   optional int32 channels = 2 [default = 0];
   optional int32 height = 3 [default = 0];
   optional int32 width = 4 [default = 0];
+
 }
 
 // The BlobProtoVector is simply a way to pass multiple blobproto instances
@@ -93,6 +126,8 @@ message NetParameter {
 
   // DEPRECATED: use 'layer' instead.
   repeated V1LayerParameter layers = 2;
+
+  optional int32 opt_level = 101 [default = 0];
 }
 
 // NOTE
@@ -199,6 +234,7 @@ message SolverParameter {
   enum SolverMode {
     CPU = 0;
     GPU = 1;
+    MLU = 2;
   }
   optional SolverMode solver_mode = 17 [default = GPU];
   // the device_id will that be used in GPU mode. Use device_id = 0 in default.
@@ -252,8 +288,8 @@ message SolverState {
 }
 
 enum Phase {
-   TRAIN = 0;
-   TEST = 1;
+    TRAIN = 0;
+    TEST = 1;
 }
 
 message NetState {
@@ -318,6 +354,9 @@ message LayerParameter {
   // The train / test phase for computation.
   optional Phase phase = 10;
 
+
+  optional string showtop = 12;
+
   // The amount of weight to assign each top blob in the objective.
   // Each layer assigns a default value, usually of either 0 or 1,
   // to each top blob.
@@ -364,11 +403,13 @@ message LayerParameter {
   optional ArgMaxParameter argmax_param = 103;
   optional BatchNormParameter batch_norm_param = 139;
   optional BiasParameter bias_param = 141;
+  optional BNParameter bn_param = 100015;
   optional ConcatParameter concat_param = 104;
   optional ContrastiveLossParameter contrastive_loss_param = 105;
   optional ConvolutionParameter convolution_param = 106;
   optional CropParameter crop_param = 144;
   optional DataParameter data_param = 107;
+  optional DetectionOutputParameter detection_output_param = 304;
   optional DropoutParameter dropout_param = 108;
   optional DummyDataParameter dummy_data_param = 109;
   optional EltwiseParameter eltwise_param = 110;
@@ -387,24 +428,301 @@ message LayerParameter {
   optional LRNParameter lrn_param = 118;
   optional MemoryDataParameter memory_data_param = 119;
   optional MVNParameter mvn_param = 120;
+  optional NormalizeParameter norm_param = 302;
   optional ParameterParameter parameter_param = 145;
+  optional PermuteParameter permute_param = 303;
   optional PoolingParameter pooling_param = 121;
   optional PowerParameter power_param = 122;
   optional PReLUParameter prelu_param = 131;
+  optional PriorBoxParameter prior_box_param = 301;
   optional PythonParameter python_param = 130;
-  optional RecurrentParameter recurrent_param = 146;
   optional ReductionParameter reduction_param = 136;
   optional ReLUParameter relu_param = 123;
   optional ReshapeParameter reshape_param = 133;
   optional ScaleParameter scale_param = 142;
-  optional SigmoidParameter sigmoid_param = 124;
   optional SoftmaxParameter softmax_param = 125;
+  optional DetectionOutParameter detection_out_param = 210;
   optional SPPParameter spp_param = 132;
   optional SliceParameter slice_param = 126;
-  optional TanHParameter tanh_param = 127;
   optional ThresholdParameter threshold_param = 128;
   optional TileParameter tile_param = 138;
   optional WindowDataParameter window_data_param = 129;
+  optional ReorgParameter reorg_param = 157;
+  optional UnPoolingParameter unpooling_param = 159;
+
+  optional InterpParameter interp_param = 100016;
+  repeated PriorBoxParameter priorbox_params = 100021;  // for ssd detection fusion
+  optional CReLUParameter crelu_param = 100022;
+  optional DetectionPoseOutputParameter detection_pose_output_param = 100023;
+
+  optional bool external_output = 100024 [default = false];
+  optional YuvToRgbParameter yuvtorgb_param = 100025;
+
+  repeated BlobDataType bottom_mlu_dtype = 204;
+  repeated BlobDataType blobs_dtype = 205;
+
+  optional float sparsity = 207 [default = 0];
+  optional Engine engine = 208 [default = DEFAULT];
+}
+
+message YuvToRgbParameter {
+  enum InputFormat {
+    YUV420SP_NV12 = 0;
+    YUV420SP_NV21 = 1;
+  }
+  enum OutputFormat {
+    RGB0 = 0;
+    BGR0 = 1;
+    ARGB = 2;
+  }
+  optional InputFormat input_format = 1 [default = YUV420SP_NV21];
+  optional OutputFormat output_format = 2 [default = RGB0];
+}
+
+message MultiBoxLossParameter {
+  // Localization loss type.
+  enum LocLossType {
+    L2 = 0;
+    SMOOTH_L1 = 1;
+  }
+  optional LocLossType loc_loss_type = 1 [default = SMOOTH_L1];
+  // Confidence loss type.
+  enum ConfLossType {
+    SOFTMAX = 0;
+    LOGISTIC = 1;
+  }
+  optional ConfLossType conf_loss_type = 2 [default = SOFTMAX];
+  // Weight for localization loss.
+  optional float loc_weight = 3 [default = 1.0];
+  // Number of classes to be predicted. Required!
+  optional uint32 num_classes = 4;
+  // If true, bounding box are shared among different classes.
+  optional bool share_location = 5 [default = true];
+  // Matching method during training.
+  enum MatchType {
+    BIPARTITE = 0;
+    PER_PREDICTION = 1;
+  }
+  optional MatchType match_type = 6 [default = PER_PREDICTION];
+  // If match_type is PER_PREDICTION, use overlap_threshold to
+  // determine the extra matching bboxes.
+  optional float overlap_threshold = 7 [default = 0.5];
+  // Use prior for matching.
+  optional bool use_prior_for_matching = 8 [default = true];
+  // Background label id.
+  optional uint32 background_label_id = 9 [default = 0];
+  // If true, also consider difficult ground truth.
+  optional bool use_difficult_gt = 10 [default = true];
+  // If true, perform negative mining.
+  optional bool do_neg_mining = 11 [default = true];
+  // The negative/positive ratio.
+  optional float neg_pos_ratio = 12 [default = 3.0];
+  // The negative overlap upperbound for the unmatched predictions.
+  optional float neg_overlap = 13 [default = 0.5];
+  // Type of coding method for bbox.
+  optional PriorBoxParameter.CodeType code_type = 14 [default = CORNER];
+  // If true, encode the variance of prior box in the loc loss target instead of
+  // in bbox.
+  optional bool encode_variance_in_target = 16 [default = false];
+  // If true, map all object classes to agnostic class. It is useful for learning
+  // objectness detector.
+  optional bool map_object_to_agnostic = 17 [default = false];
+  enum Engine {
+    DEFAULT = 0;
+    CAFFE = 1;
+    MLU = 2;
+  }
+  optional Engine engine = 18 [default = DEFAULT];
+}
+
+
+message PriorBoxParameter {
+  // Encode/decode type.
+  enum CodeType {
+    CORNER = 1;
+    CENTER_SIZE = 2;
+  }
+
+  enum PriorType {
+    CLASSIC = 1;
+    DENSE = 2;
+  }
+  optional PriorType p_type = 1001 [default = CLASSIC];
+  optional int32 inner_scale = 1002 [default = 2];
+
+  // Minimum box size (in pixels). Required!
+  repeated float min_size = 1;
+  // Maximum box size (in pixels). Required!
+  repeated float max_size = 2;
+  // Various of aspect ratios. Duplicate ratios will be ignored.
+  // If none is provided, we use default ratio 1.
+  repeated float aspect_ratio = 3;
+  // If true, will flip each aspect ratio.
+  // For example, if there is aspect ratio "r",
+  // we will generate aspect ratio "1.0/r" as well.
+  optional bool flip = 4 [default = true];
+  // If true, will clip the prior so that it is within [0, 1]
+  optional bool clip = 5 [default = true];
+  // Variance for adjusting the prior bboxes.
+  repeated float variance = 6;
+  // By default, we calculate img_height, img_width, step_x, step_y based on
+  // bottom[0] (feat) and bottom[1] (img). Unless these values are explicitely
+  // provided.
+  // Explicitly provide the img_size.
+  optional uint32 img_size = 7;
+  // Either img_size or img_h/img_w should be specified; not both.
+  optional uint32 img_h = 8;
+  optional uint32 img_w = 9;
+
+  // Explicitly provide the step size.
+  optional float step = 10;
+  // Either step or step_h/step_w should be specified; not both.
+  optional float step_h = 11;
+  optional float step_w = 12;
+
+  // Offset to the top left corner of each cell.
+  optional float offset = 13 [default = 0.5];
+
+  enum Engine {
+    DEFAULT = 0;
+    CAFFE = 1;
+    MLU = 2;
+  }
+  optional Engine engine = 14 [default = DEFAULT];
+}
+
+// The label (display) name and label id.
+message LabelMapItem {
+  // Both name and label are required.
+  optional string name = 1;
+  optional int32 label = 2;
+  // display_name is optional.
+  optional string display_name = 3;
+}
+
+message LabelMap {
+  repeated LabelMapItem item = 1;
+}
+
+// Sample a bbox in the normalized space [0, 1] with provided constraints.
+message Sampler {
+  // Minimum scale of the sampled bbox.
+  optional float min_scale = 1 [default = 1.];
+  // Maximum scale of the sampled bbox.
+  optional float max_scale = 2 [default = 1.];
+
+  // Minimum aspect ratio of the sampled bbox.
+  optional float min_aspect_ratio = 3 [default = 1.];
+  // Maximum aspect ratio of the sampled bbox.
+  optional float max_aspect_ratio = 4 [default = 1.];
+}
+
+// Constraints for selecting sampled bbox.
+message SampleConstraint {
+  // Minimum Jaccard overlap between sampled bbox and all bboxes in
+  // AnnotationGroup.
+  optional float min_jaccard_overlap = 1;
+  // Maximum Jaccard overlap between sampled bbox and all bboxes in
+  // AnnotationGroup.
+  optional float max_jaccard_overlap = 2;
+
+  // Minimum coverage of sampled bbox by all bboxes in AnnotationGroup.
+  optional float min_sample_coverage = 3;
+  // Maximum coverage of sampled bbox by all bboxes in AnnotationGroup.
+  optional float max_sample_coverage = 4;
+
+  // Minimum coverage of all bboxes in AnnotationGroup by sampled bbox.
+  optional float min_object_coverage = 5;
+  // Maximum coverage of all bboxes in AnnotationGroup by sampled bbox.
+  optional float max_object_coverage = 6;
+}
+
+// Sample a batch of bboxes with provided constraints.
+message BatchSampler {
+  // Use original image as the source for sampling.
+  optional bool use_original_image = 1 [default = true];
+
+  // Constraints for sampling bbox.
+  optional Sampler sampler = 2;
+
+  // Constraints for determining if a sampled bbox is positive or negative.
+  optional SampleConstraint sample_constraint = 3;
+
+  // If provided, break when found certain number of samples satisfing the
+  // sample_constraint.
+  optional uint32 max_sample = 4;
+
+  // Maximum number of trials for sampling to avoid infinite loop.
+  optional uint32 max_trials = 5 [default = 100];
+}
+
+// Condition for emitting annotations.
+message EmitConstraint {
+  enum EmitType {
+    CENTER = 0;
+    MIN_OVERLAP = 1;
+  }
+  optional EmitType emit_type = 1 [default = CENTER];
+  // If emit_type is MIN_OVERLAP, provide the emit_overlap.
+  optional float emit_overlap = 2;
+}
+
+// The normalized bounding box [0, 1] w.r.t. the input image size.
+message NormalizedBBox {
+  optional float xmin = 1;
+  optional float ymin = 2;
+  optional float xmax = 3;
+  optional float ymax = 4;
+  optional int32 label = 5;
+  optional bool difficult = 6;
+  optional float score = 7;
+  optional float size = 8;
+}
+
+// Annotation for each object instance.
+message Annotation {
+  optional int32 instance_id = 1 [default = 0];
+  optional NormalizedBBox bbox = 2;
+}
+
+// Group of annotations for a particular label.
+message AnnotationGroup {
+  optional int32 group_label = 1;
+  repeated Annotation annotation = 2;
+}
+
+// An extension of Datum which contains "rich" annotations.
+message AnnotatedDatum {
+  enum AnnotationType {
+    BBOX = 0;
+  }
+  optional Datum datum = 1;
+  // If there are "rich" annotations, specify the type of annotation.
+  // Currently it only supports bounding box.
+  // If there are no "rich" annotations, use label in datum instead.
+  optional AnnotationType type = 2;
+  // Each group contains annotation for a particular class.
+  repeated AnnotationGroup annotation_group = 3;
+}
+
+
+
+message DetectionOutParameter {
+  // yolo detection output layer
+  optional uint32 side = 1 [default = 13];
+  optional uint32 num_classes = 2 [default = 20];
+  optional uint32 num_box = 3 [default = 5];
+  optional uint32 coords = 4 [default = 4];
+  optional float confidence_threshold = 5 [default = 0.01];
+  optional float nms_threshold = 6 [default = 0.45];
+  repeated float biases = 7;
+  optional string label_map_file = 8;
+  enum Engine {
+    DEFAULT = 0;
+    CAFFE = 1;
+    MLU = 2;
+  }
+  optional Engine engine = 9 [default = DEFAULT];
 }
 
 // Message that stores parameters used to apply transformation
@@ -418,9 +736,12 @@ message TransformationParameter {
   optional bool mirror = 2 [default = false];
   // Specify if we would like to randomly crop an image.
   optional uint32 crop_size = 3 [default = 0];
+  optional uint32 crop_h = 11 [default = 0];
+  optional uint32 crop_w = 12 [default = 0];
+
   // mean_file and mean_value cannot be specified at the same time
   optional string mean_file = 4;
-  // if specified can be repeated once (would subtract it from all the channels)
+  // if specified can be repeated once (would substract it from all the channels)
   // or can be repeated the same number of times as channels
   // (would subtract them from the corresponding channel)
   repeated float mean_value = 5;
@@ -428,6 +749,112 @@ message TransformationParameter {
   optional bool force_color = 6 [default = false];
   // Force the decoded image to have 1 color channels.
   optional bool force_gray = 7 [default = false];
+  // Resize policy
+  optional ResizeParameter resize_param = 8;
+  // Noise policy
+  optional NoiseParameter noise_param = 9;
+  // Constraint for emitting the annotation after transformation.
+  optional EmitConstraint emit_constraint = 10;
+}
+
+// Message that stores parameters used by data transformer for transformation policy
+message ResizeParameter {
+  //Probability of using this resize policy
+  optional float prob = 1 [default = 1];
+
+  enum Resize_mode {
+    WARP = 1;
+    FIT_SMALL_SIZE = 2;
+    FIT_LARGE_SIZE_AND_PAD = 3;
+  }
+  optional Resize_mode resize_mode = 2 [default = WARP];
+  optional uint32 height = 3 [default = 0];
+  optional uint32 width = 4 [default = 0];
+
+  enum Pad_mode {
+    CONSTANT = 1;
+    MIRRORED = 2;
+    REPEAT_NEAREST = 3;
+  }
+  // Padding mode for BE_SMALL_SIZE_AND_PAD mode and object centering
+  optional Pad_mode pad_mode = 5 [default = CONSTANT];
+  // if specified can be repeated once (would fill all the channels)
+  // or can be repeated the same number of times as channels
+  // (would use it them to the corresponding channel)
+  repeated float pad_value = 6;
+
+  enum Interp_mode { // Same as in OpenCV
+    LINEAR = 1;
+    AREA = 2;
+    NEAREST = 3;
+    CUBIC = 4;
+    LANCZOS4 = 5;
+  }
+  // interpolation for for resizing
+  repeated Interp_mode interp_mode = 7;
+  enum Engine {
+    DEFAULT = 0;
+    CAFFE = 1;
+    MLU = 2;
+  }
+  optional Engine engine = 8 [default = DEFAULT];
+}
+
+message SaltPepperParameter {
+  // Percentage of pixels
+  optional float fraction = 1 [default = 0];
+  repeated float value = 2;
+  enum Engine {
+    DEFAULT = 0;
+    CAFFE = 1;
+    MLU = 2;
+  }
+  optional Engine engine = 3 [default = DEFAULT];
+}
+
+// Message that stores parameters used by data transformer for transformation
+// policy
+message NoiseParameter {
+  //Probability of using this resize policy
+  optional float prob = 1 [default = 0];
+  // Histogram equalized
+  optional bool hist_eq = 2 [default = false];
+  // Color inversion
+  optional bool inverse = 3 [default = false];
+  // Grayscale
+  optional bool decolorize = 4 [default = false];
+  // Gaussian blur
+  optional bool gauss_blur = 5 [default = false];
+
+  // JPEG compression quality (-1 = no compression)
+  optional float jpeg = 6 [default = -1];
+
+  // Posterization
+  optional bool posterize = 7 [default = false];
+
+  // Erosion
+  optional bool erode = 8 [default = false];
+
+  // Salt-and-pepper noise
+  optional bool saltpepper = 9 [default = false];
+
+  optional SaltPepperParameter saltpepper_param = 10;
+
+  // Local histogram equalization
+  optional bool clahe = 11 [default = false];
+
+  // Color space conversion
+  optional bool convert_to_hsv = 12 [default = false];
+
+  // Color space conversion
+  optional bool convert_to_lab = 13 [default = false];
+  enum Engine {
+    DEFAULT = 0;
+    CAFFE = 1;
+    MLU = 2;
+  }
+  optional Engine engine = 14 [default = DEFAULT];
+
 }
 
 // Message that stores parameters shared by loss layers
@@ -457,6 +884,12 @@ message LossParameter {
   // is not specified, then setting this to false will be equivalent to
   // normalization = BATCH_SIZE to be consistent with previous behavior.
   optional bool normalize = 2;
+  enum Engine {
+    DEFAULT = 0;
+    CAFFE = 1;
+    MLU = 2;
+  }
+  optional Engine engine = 4 [default = DEFAULT];
 }
 
 // Messages that store parameters used by individual layer types follow, in
@@ -477,6 +910,13 @@ message AccuracyParameter {
 
   // If specified, ignore instances with the given label.
   optional int32 ignore_label = 3;
+
+  enum Engine {
+    DEFAULT = 0;
+    CAFFE = 1;
+    MLU = 2;
+  }
+  optional Engine engine = 4 [default = DEFAULT];
 }
 
 message ArgMaxParameter {
@@ -488,6 +928,13 @@ message ArgMaxParameter {
   // By default ArgMaxLayer maximizes over the flattened trailing dimensions
   // for each index of the first / num dimension.
   optional int32 axis = 3;
+
+  enum Engine {
+    DEFAULT = 0;
+    CAFFE = 1;
+    MLU = 2;
+  }
+  optional Engine engine = 4 [default = DEFAULT];
 }
 
 message ConcatParameter {
@@ -499,6 +946,57 @@ message ConcatParameter {
 
   // DEPRECATED: alias for "axis" -- does not support negative indexing.
   optional uint32 concat_dim = 1 [default = 1];
+
+  enum Engine {
+    DEFAULT = 0;
+    CAFFE = 1;
+    MLU = 2;
+  }
+  optional Engine engine = 3 [default = DEFAULT];
+
+}
+
+message InterpParameter {
+  optional int32 height = 1 [default = 0];  // Height of output
+  optional int32 width = 2 [default = 0];  // Width of output
+  optional int32 zoom_factor = 3 [default = 1];  // zoom factor
+  optional int32 shrink_factor = 4 [default = 1];  // shrink factor
+  optional int32 pad_beg = 5 [default = 0];  // padding at begin of input
+  optional int32 pad_end = 6 [default = 0];  // padding at end of input
+  optional bool align_corners = 7 [default = true];
+
+  enum Engine {
+    DEFAULT = 0;
+    CAFFE = 1;
+    MLU = 2;
+  }
+  optional Engine engine = 8 [default = DEFAULT];
+ }
+
+
+message ReorgParameter {
+  optional uint32 stride = 1;
+  optional bool reverse = 2 [default = false];
+  enum Engine {
+    DEFAULT = 0;
+    CAFFE = 1;
+    MLU = 2;
+  }
+  optional Engine engine = 3 [default = DEFAULT];
+}
+
+message BNParameter {
+  optional bool frozen = 1 [default = true];
+  optional float momentum = 2 [default = .999];
+  optional float eps = 3 [default = 1e-5];
+  optional FillerParameter slope_filler = 7; // The filler for the slope
+  optional FillerParameter bias_filler = 8; // The filler for the bias
+  enum Engine {
+    DEFAULT = 0;
+    CAFFE = 1;
+    MLU = 2;
+  }
+  optional Engine engine = 4 [default = DEFAULT];
 }
 
 message BatchNormParameter {
@@ -509,7 +1007,7 @@ message BatchNormParameter {
   // normalization.
   // By default, it is set to false when the network is in the training
   // phase and true when the network is in the testing phase.
-  optional bool use_global_stats = 1;
+  optional bool use_global_stats = 1 [default = true];
   // What fraction of the moving average remains each iteration?
   // Smaller values make the moving average decay faster, giving more
   // weight to the recent values.
@@ -521,6 +1019,15 @@ message BatchNormParameter {
   // Small value to add to the variance estimate so that we don't divide by
   // zero.
   optional float eps = 3 [default = 1e-5];
+
+  optional bool use_alpha_beta = 4 [default = false];
+
+  enum Engine {
+    DEFAULT = 0;
+    CAFFE = 1;
+    MLU = 2;
+  }
+  optional Engine engine = 5 [default = DEFAULT];
 }
 
 message BiasParameter {
@@ -553,6 +1060,12 @@ message BiasParameter {
   // Default is the zero (0) initialization, resulting in the BiasLayer
   // initially performing the identity operation.
   optional FillerParameter filler = 3;
+  enum Engine {
+    DEFAULT = 0;
+    CAFFE = 1;
+    MLU = 2;
+  }
+  optional Engine engine = 4 [default = DEFAULT];
 }
 
 message ContrastiveLossParameter {
@@ -565,6 +1078,12 @@ message ContrastiveLossParameter {
   // legacy_version = true uses (margin - d^2). This is kept to support /
   // reproduce existing models and results
   optional bool legacy_version = 2 [default = false];
+  enum Engine {
+    DEFAULT = 0;
+    CAFFE = 1;
+    MLU = 2;
+  }
+  optional Engine engine = 3 [default = DEFAULT];
 }
 
 message ConvolutionParameter {
@@ -594,13 +1113,6 @@ message ConvolutionParameter {
 
   optional FillerParameter weight_filler = 7; // The filler for the weight
   optional FillerParameter bias_filler = 8; // The filler for the bias
-  enum Engine {
-    DEFAULT = 0;
-    CAFFE = 1;
-    CUDNN = 2;
-  }
-  optional Engine engine = 15 [default = DEFAULT];
-
   // The axis to interpret as "channels" when performing convolution.
   // Preceding dimensions are treated as independent inputs;
   // succeeding dimensions are treated as "spatial".
@@ -618,6 +1130,21 @@ message ConvolutionParameter {
   // implementation; for input blobs with num_axes != 2, this option is
   // ignored and the ND implementation will be used.)
   optional bool force_nd_im2col = 17 [default = false];
+  optional string mean_file = 33;
+  repeated float mean_value = 34;
+  optional bool sparse_mode = 35 [default = false];
+  optional float std = 36;
+  enum Engine {
+    DEFAULT = 0;
+    CAFFE = 1;
+    MLU = 2;
+  }
+  optional Engine engine = 37 [default = DEFAULT];
+  optional bool yuv_input = 38 [default = false];
+  // scale is duplicate to std, for the sake of forward compatibility.
+  // you should set either scale or std, not both.
+  optional float scale = 39;
+  optional bool same_mode = 41 [default = false];
 }
 
 message CropParameter {
@@ -636,6 +1163,12 @@ message CropParameter {
   // axis).
   optional int32 axis = 1 [default = 2];
   repeated uint32 offset = 2;
+  enum Engine {
+    DEFAULT = 0;
+    CAFFE = 1;
+    MLU = 2;
+  }
+  optional Engine engine = 3 [default = DEFAULT];
 }
 
 message DataParameter {
@@ -672,8 +1205,98 @@ message DataParameter {
   optional uint32 prefetch = 10 [default = 4];
 }
 
+message NonMaximumSuppressionParameter {
+  // Threshold to be used in nms.
+  optional float nms_threshold = 1 [default = 0.3];
+  // Maximum number of results to be kept.
+  optional int32 top_k = 2;
+  enum Engine {
+    DEFAULT = 0;
+    CAFFE = 1;
+    MLU = 2;
+  }
+  optional Engine engine = 3 [default = DEFAULT];
+}
+
+message SaveOutputParameter {
+  // Output directory. If not empty, we will save the results.
+  optional string output_directory = 1;
+  // Output name prefix.
+  optional string output_name_prefix = 2;
+  // Output format.
+  //    VOC - PASCAL VOC output format.
+  //    COCO - MS COCO output format.
+  optional string output_format = 3;
+  // If you want to output results, must also provide the following two files.
+  // Otherwise, we will ignore saving results.
+  // label map file.
+  optional string label_map_file = 4;
+  // A file which contains a list of names and sizes with same order
+  // of the input DB. The file is in the following format:
+  //    name height width
+  //    ...
+  optional string name_size_file = 5;
+  // Number of test images. It can be less than the lines specified in
+  // name_size_file. For example, when we only want to evaluate on part
+  // of the test images.
+  optional uint32 num_test_image = 6;
+  enum Engine {
+    DEFAULT = 0;
+    CAFFE = 1;
+    MLU = 2;
+  }
+  optional Engine engine = 7 [default = DEFAULT];
+}
+
+message DetectionOutputParameter {
+  // Number of classes to be predicted. Required!
+  optional uint32 num_classes = 1;
+  // If true, bounding box are shared among different classes.
+  optional bool share_location = 2 [default = true];
+  // Background label id. If there is no background class,
+  // set it as -1.
+  optional int32 background_label_id = 3 [default = 0];
+  // Parameters used for non maximum suppression.
+  optional NonMaximumSuppressionParameter nms_param = 4;
+  // Parameters used for saving detection results.
+  optional SaveOutputParameter save_output_param = 5;
+  // Type of coding method for bbox.
+  optional PriorBoxParameter.CodeType code_type = 6 [default = CORNER];
+  // If true, variance is encoded in target; otherwise we need to adjust the
+  // predicted offset accordingly.
+  optional bool variance_encoded_in_target = 8 [default = false];
+  // Number of total bboxes to be kept per image after nms step.
+  // -1 means keeping all bboxes after nms step.
+  optional int32 keep_top_k = 7 [default = -1];
+  // Only consider detections whose confidences are larger than a threshold.
+  // If not provided, consider all boxes.
+  optional float confidence_threshold = 9;
+  // If true, visualize the detection results.
+  optional bool visualize = 10 [default = false];
+  // The threshold used to visualize the detection results.
+  optional float visualize_threshold = 11;
+  // optional uint32 side = 12 [default = 13];
+  // optional uint32 num_box = 13 [default = 5];
+  // optional uint32 coords = 14 [default = 4];
+  // optional float nms_threshold = 16 [default = 0.45];
+  // repeated float biases = 17;
+  // optional string label_map_file = 18;
+  enum Engine {
+    DEFAULT = 0;
+    CAFFE = 1;
+    MLU = 2;
+  }
+  optional Engine engine = 12 [default = DEFAULT];
+}
 message DropoutParameter {
   optional float dropout_ratio = 1 [default = 0.5]; // dropout ratio
+  optional bool scale_train = 2 [default = true];
+  enum Engine {
+    DEFAULT = 0;
+    CAFFE = 1;
+    MLU = 2;
+  }
+  optional Engine engine = 3 [default = DEFAULT];
 }
 
 // DummyDataLayer fills any number of arbitrarily shaped blobs with random
@@ -707,6 +1330,13 @@ message EltwiseParameter {
   // Whether to use an asymptotically slower (for >2 inputs) but stabler method
   // of computing the gradient for the PROD operation. (No effect for SUM op.)
   optional bool stable_prod_grad = 3 [default = true];
+
+  enum Engine {
+    DEFAULT = 0;
+    CAFFE = 1;
+    MLU = 2;
+  }
+  optional Engine engine = 4 [default = DEFAULT];
 }
 
 // Message that stores parameters used by ELULayer
@@ -715,6 +1345,13 @@ message ELUParameter {
   // Clevert, D.-A., Unterthiner, T., & Hochreiter, S. (2015). Fast and Accurate
   // Deep Network Learning by Exponential Linear Units (ELUs). arXiv
   optional float alpha = 1 [default = 1];
+  enum Engine {
+    DEFAULT = 0;
+    CAFFE = 1;
+    MLU = 2;
+  }
+  optional Engine engine = 2 [default = DEFAULT];
+
 }
 
 // Message that stores parameters used by EmbedLayer
@@ -729,6 +1366,12 @@ message EmbedParameter {
   optional FillerParameter weight_filler = 4; // The filler for the weight
   optional FillerParameter bias_filler = 5; // The filler for the bias
 
+  enum Engine {
+    DEFAULT = 0;
+    CAFFE = 1;
+    MLU = 2;
+  }
+  optional Engine engine = 6 [default = DEFAULT];
 }
 
 // Message that stores parameters used by ExpLayer
@@ -739,6 +1382,14 @@ message ExpParameter {
   optional float base = 1 [default = -1.0];
   optional float scale = 2 [default = 1.0];
   optional float shift = 3 [default = 0.0];
+
+  enum Engine {
+    DEFAULT = 0;
+    CAFFE = 1;
+    MLU = 2;
+  }
+  optional Engine engine = 4 [default = DEFAULT];
+
 }
 
 /// Message that stores parameters used by FlattenLayer
@@ -751,6 +1402,13 @@ message FlattenParameter {
   // May be negative to index from the end (e.g., the default -1 for the last
   // axis).
   optional int32 end_axis = 2 [default = -1];
+
+  enum Engine {
+    DEFAULT = 0;
+    CAFFE = 1;
+    MLU = 2;
+  }
+  optional Engine engine = 3 [default = DEFAULT];
 }
 
 // Message that stores parameters used by HDF5DataLayer
@@ -810,6 +1468,8 @@ message ImageDataParameter {
   // data.
   optional bool mirror = 6 [default = false];
   optional string root_folder = 12 [default = ""];
+  // Specify reading images iterations
+  optional uint32 iterations = 13 [default = 1];
 }
 
 message InfogainLossParameter {
@@ -833,6 +1493,14 @@ message InnerProductParameter {
   // of the weight matrix. The weight matrix itself is not going to be transposed
   // but rather the transfer flag of operations will be toggled accordingly.
   optional bool transpose = 6 [default = false];
+
+  optional bool sparse_mode = 8 [default = false];
+  enum Engine {
+    DEFAULT = 0;
+    CAFFE = 1;
+    MLU = 2;
+  }
+  optional Engine engine = 9 [default = DEFAULT];
 }
 
 message InputParameter {
@@ -851,6 +1519,12 @@ message LogParameter {
   optional float base = 1 [default = -1.0];
   optional float scale = 2 [default = 1.0];
   optional float shift = 3 [default = 0.0];
+  enum Engine {
+    DEFAULT = 0;
+    CAFFE = 1;
+    MLU = 2;
+  }
+  optional Engine engine = 4 [default = DEFAULT];
 }
 
 // Message that stores parameters used by LRNLayer
@@ -867,7 +1541,7 @@ message LRNParameter {
   enum Engine {
     DEFAULT = 0;
     CAFFE = 1;
-    CUDNN = 2;
+    MLU = 2;
   }
   optional Engine engine = 6 [default = DEFAULT];
 }
@@ -888,11 +1562,49 @@ message MVNParameter {
 
   // Epsilon for not dividing by zero while normalizing variance
   optional float eps = 3 [default = 1e-9];
+  enum Engine {
+    DEFAULT = 0;
+    CAFFE = 1;
+    MLU = 2;
+  }
+  optional Engine engine = 4 [default = DEFAULT];
 }
+
+// Message that stores parameters used by NormalizeLayer
+message NormalizeParameter {
+  optional bool across_spatial = 1 [default = true];
+  // Initial value of scale. Default is 1.0 for all
+  optional FillerParameter scale_filler = 2;
+  // Whether or not scale parameters are shared across channels.
+  optional bool channel_shared = 3 [default = true];
+  // Epsilon for not dividing by zero while normalizing variance
+  optional float eps = 4 [default = 1e-10];
+  enum Engine {
+    DEFAULT = 0;
+    CAFFE = 1;
+    MLU = 2;
+  }
+  optional Engine engine = 5 [default = DEFAULT];
+}
+
 
 message ParameterParameter {
   optional BlobShape shape = 1;
 }
+
+message PermuteParameter {
+  // The new orders of the axes of data. Notice it should be with
+  // in the same range as the input data, and it starts from 0.
+  // Do not provide repeated order.
+  repeated uint32 order = 1;
+  enum Engine {
+    DEFAULT = 0;
+    CAFFE = 1;
+    MLU = 2;
+  }
+  optional Engine engine = 2 [default = DEFAULT];
+}
+
 
 message PoolingParameter {
   enum PoolMethod {
@@ -912,15 +1624,16 @@ message PoolingParameter {
   optional uint32 stride = 3 [default = 1]; // The stride (equal in Y, X)
   optional uint32 stride_h = 7; // The stride height
   optional uint32 stride_w = 8; // The stride width
-  enum Engine {
-    DEFAULT = 0;
-    CAFFE = 1;
-    CUDNN = 2;
-  }
-  optional Engine engine = 11 [default = DEFAULT];
   // If global_pooling then it will pool over the size of the bottom by doing
   // kernel_h = bottom->height and kernel_w = bottom->width
   optional bool global_pooling = 12 [default = false];
+  enum Engine {
+    DEFAULT = 0;
+    CAFFE = 1;
+    MLU = 2;
+  }
+  optional Engine engine = 13 [default = DEFAULT];
+  optional bool ceil_mode = 14 [default = true];
 }
 
 message PowerParameter {
@@ -928,6 +1641,12 @@ message PowerParameter {
   optional float power = 1 [default = 1.0];
   optional float scale = 2 [default = 1.0];
   optional float shift = 3 [default = 0.0];
+  enum Engine {
+    DEFAULT = 0;
+    CAFFE = 1;
+    MLU = 2;
+  }
+  optional Engine engine = 4 [default = DEFAULT];
 }
 
 message PythonParameter {
@@ -940,25 +1659,6 @@ message PythonParameter {
   optional string param_str = 3 [default = ''];
   // DEPRECATED
   optional bool share_in_parallel = 4 [default = false];
-}
-
-// Message that stores parameters used by RecurrentLayer
-message RecurrentParameter {
-  // The dimension of the output (and usually hidden state) representation --
-  // must be explicitly set to non-zero.
-  optional uint32 num_output = 1 [default = 0];
-
-  optional FillerParameter weight_filler = 2; // The filler for the weight
-  optional FillerParameter bias_filler = 3; // The filler for the bias
-
-  // Whether to enable displaying debug_info in the unrolled recurrent net.
-  optional bool debug_info = 4 [default = false];
-
-  // Whether to add as additional inputs (bottoms) the initial hidden state
-  // blobs, and add as additional outputs (tops) the final timestep hidden state
-  // blobs.  The number of additional bottom/top blobs required depends on the
-  // recurrent architecture -- e.g., 1 for RNNs, 2 for LSTMs.
-  optional bool expose_hidden = 5 [default = false];
 }
 
 // Message that stores parameters used by ReductionLayer
@@ -988,6 +1688,12 @@ message ReductionParameter {
   optional int32 axis = 2 [default = 0];
 
   optional float coeff = 3 [default = 1.0]; // coefficient for output
+  enum Engine {
+    DEFAULT = 0;
+    CAFFE = 1;
+    MLU = 2;
+  }
+  optional Engine engine = 4 [default = DEFAULT];
 }
 
 // Message that stores parameters used by ReLULayer
@@ -998,14 +1704,26 @@ message ReLUParameter {
   // improve neural network acoustic models. In ICML Workshop on Deep Learning
   // for Audio, Speech, and Language Processing.
   optional float negative_slope = 1 [default = 0];
+  // allow setting upper value limit to relu output eg Relu6 means ouput <= 6
+  optional int32 upper_limit = 2 [default = 0];
   enum Engine {
     DEFAULT = 0;
     CAFFE = 1;
-    CUDNN = 2;
+    MLU = 2;
   }
-  optional Engine engine = 2 [default = DEFAULT];
+  optional Engine engine = 3 [default = DEFAULT];
 }
 
+message CReLUParameter {
+    optional float negative_slope = 1 [default = 0];
+    optional int32 concat_axis = 2 [default = 1];
+    enum Engine {
+      DEFAULT = 0;
+      CAFFE = 1;
+      MLU = 2;
+    }
+    optional Engine engine = 3 [default = DEFAULT];
+}
 message ReshapeParameter {
   // Specify the output dimensions. If some of the dimensions are set to 0,
   // the corresponding dimension from the bottom layer is used (unchanged).
@@ -1068,6 +1786,12 @@ message ReshapeParameter {
   //
   optional int32 axis = 2 [default = 0];
   optional int32 num_axes = 3 [default = -1];
+  enum Engine {
+    DEFAULT = 0;
+    CAFFE = 1;
+    MLU = 2;
+  }
+  optional Engine engine = 4 [default = DEFAULT];
 }
 
 message ScaleParameter {
@@ -1105,17 +1829,13 @@ message ScaleParameter {
   // may be more efficient).  Initialized with bias_filler (defaults to 0).
   optional bool bias_term = 4 [default = false];
   optional FillerParameter bias_filler = 5;
-}
-
-message SigmoidParameter {
   enum Engine {
     DEFAULT = 0;
     CAFFE = 1;
-    CUDNN = 2;
+    MLU = 2;
   }
-  optional Engine engine = 1 [default = DEFAULT];
+  optional Engine engine = 6 [default = DEFAULT];
 }
-
 message SliceParameter {
   // The axis along which to slice -- may be negative to index from the end
   // (e.g., -1 for the last axis).
@@ -1125,30 +1845,29 @@ message SliceParameter {
 
   // DEPRECATED: alias for "axis" -- does not support negative indexing.
   optional uint32 slice_dim = 1 [default = 1];
+
+  enum Engine {
+    DEFAULT = 0;
+    CAFFE = 1;
+    MLU = 2;
+  }
+  optional Engine engine = 4 [default = DEFAULT];
+
 }
 
 // Message that stores parameters used by SoftmaxLayer, SoftmaxWithLossLayer
 message SoftmaxParameter {
-  enum Engine {
-    DEFAULT = 0;
-    CAFFE = 1;
-    CUDNN = 2;
-  }
-  optional Engine engine = 1 [default = DEFAULT];
 
   // The axis along which to perform the softmax -- may be negative to index
   // from the end (e.g., -1 for the last axis).
   // Any other axes will be evaluated as independent softmaxes.
   optional int32 axis = 2 [default = 1];
-}
-
-message TanHParameter {
   enum Engine {
     DEFAULT = 0;
     CAFFE = 1;
-    CUDNN = 2;
+    MLU = 2;
   }
-  optional Engine engine = 1 [default = DEFAULT];
+  optional Engine engine = 3 [default = DEFAULT];
 }
 
 // Message that stores parameters used by TileLayer
@@ -1163,6 +1882,12 @@ message TileParameter {
 // Message that stores parameters used by ThresholdLayer
 message ThresholdParameter {
   optional float threshold = 1 [default = 0]; // Strictly positive values
+  enum Engine {
+      DEFAULT = 0;
+      CAFFE = 1;
+      MLU = 2;
+  }
+  optional Engine engine = 2 [default = DEFAULT];
 }
 
 message WindowDataParameter {
@@ -1209,9 +1934,9 @@ message SPPParameter {
   enum Engine {
     DEFAULT = 0;
     CAFFE = 1;
-    CUDNN = 2;
+    MLU = 2;
   }
-  optional Engine engine = 6 [default = DEFAULT];
+  optional Engine engine = 3 [default = DEFAULT];
 }
 
 // DEPRECATED: use LayerParameter.
@@ -1296,15 +2021,20 @@ message V1LayerParameter {
   optional PoolingParameter pooling_param = 19;
   optional PowerParameter power_param = 21;
   optional ReLUParameter relu_param = 30;
-  optional SigmoidParameter sigmoid_param = 38;
   optional SoftmaxParameter softmax_param = 39;
   optional SliceParameter slice_param = 31;
-  optional TanHParameter tanh_param = 37;
   optional ThresholdParameter threshold_param = 25;
   optional WindowDataParameter window_data_param = 20;
   optional TransformationParameter transform_param = 36;
   optional LossParameter loss_param = 42;
   optional V0LayerParameter layer = 1;
+
+  repeated BlobDataType bottom_mlu_dtype = 204;
+  repeated BlobDataType blobs_dtype = 205;
+
+  optional int32 split_num = 107 [default = 1];
+  optional float sparsity = 108 [default = 0.];
+  optional Engine engine = 109 [default = DEFAULT];
 }
 
 // DEPRECATED: V0LayerParameter is the old way of specifying layer parameters
@@ -1399,6 +2129,40 @@ message V0LayerParameter {
   optional uint32 concat_dim = 65 [default = 1];
 
   optional HDF5OutputParameter hdf5_output_param = 1001;
+
+  repeated BlobDataType bottom_mlu_dtype = 204;
+  repeated BlobDataType blobs_dtype = 205;
+
+  optional int32 split_num = 206 [default = 1];
+  optional float sparsity = 207 [default = 0];
+  optional Engine engine = 208 [default = DEFAULT];
+}
+
+// Message that stores parameters used by UnPoolingLayer
+message UnPoolingParameter {
+  enum UnPoolMethod {
+    FIXED = 0;  // Put in the middle of a kernel
+    DIV = 1;    // Divide equally through a kernel
+    REP = 2;    // Repeat through a kernel
+  }
+  optional UnPoolMethod unpool = 1 [default = FIXED]; // The unpooling method
+  // Pad, kernel size, and stride are all given as a single value for equal
+  // dimensions in height and width or as Y, X pairs.
+  optional uint32 out_pad = 4 [default = 0]; // The padding size (equal in Y, X)
+  optional uint32 out_pad_h = 9 [default = 0]; // The padding height
+  optional uint32 out_pad_w = 10 [default = 0]; // The padding width
+  optional uint32 out_kernel_size = 2; // The kernel size (square)
+  optional uint32 out_kernel_h = 5; // The kernel height
+  optional uint32 out_kernel_w = 6; // The kernel width
+  optional uint32 out_stride = 3 [default = 1]; // The stride (equal in Y, X)
+  optional uint32 out_stride_h = 7; // The stride height
+  optional uint32 out_stride_w = 8; // The stride width
+  enum Engine {
+    DEFAULT = 0;
+    CAFFE = 1;
+    MLU = 2;
+  }
+  optional Engine engine = 11 [default = DEFAULT];
 }
 
 message PReLUParameter {
@@ -1409,4 +2173,78 @@ message PReLUParameter {
   optional FillerParameter filler = 1;
   // Whether or not slope parameters are shared across channels.
   optional bool channel_shared = 2 [default = false];
+  enum Engine {
+    DEFAULT = 0;
+    CAFFE = 1;
+    MLU = 2;
+  }
+  optional Engine engine = 3 [default = DEFAULT];
+}
+
+
+message SegmentInfoUnit {
+  // specified name to identify, MLU with subnet[i], CPU with layer name
+  required string name = 1;
+  // current type
+  enum TYPE {
+      CPU = 0;
+      MLU = 1;
+  }
+  required TYPE type = 4;
+  // input blobs
+  repeated string bottom = 2;
+  // output blobs
+  repeated string top = 3;
+  // subnet start
+  required int32 start = 5;
+  // subnet end
+  required int32 end = 6;
+}
+
+message OfflineContent {
+  // offline model content size
+  required int32 count = 1;
+  required bytes data = 2;
+}
+
+message SegmentInfo {
+  // specified name
+  optional string name = 1;
+  required int32  flag = 5;
+  repeated SegmentInfoUnit unit = 2;
+  required NetParameter net_proto = 3;
+  required NetParameter net_weights = 4;
+  // required OfflineContent offine = 6;
+}
+
+message DetectionPoseOutputParameter {
+  // Number of classes to be predicted. Required!
+  optional uint32 num_classes = 1;
+  // Number of classes to be predicted. Required!
+  optional uint32 num_poses = 12;
+  // If true, bounding box are shared among different classes.
+  optional bool share_location = 2 [default = true];
+  optional bool share_pose = 13 [default = true];
+  // Background label id. If there is no background class,
+  // set it as -1.
+  optional int32 background_label_id = 3 [default = 0];
+  // Parameters used for non maximum suppression.
+  optional NonMaximumSuppressionParameter nms_param = 4;
+  // Parameters used for saving detection results.
+  optional SaveOutputParameter save_output_param = 5;
+  // Type of coding method for bbox.
+  optional PriorBoxParameter.CodeType code_type = 6 [default = CORNER];
+  // If true, variance is encoded in target; otherwise we need to adjust the
+  // predicted offset accordingly.
+  optional bool variance_encoded_in_target = 8 [default = false];
+  // Number of total bboxes to be kept per image after nms step.
+  // -1 means keeping all bboxes after nms step.
+  optional int32 keep_top_k = 7 [default = -1];
+  // Only consider detections whose confidences are larger than a threshold.
+  // If not provided, consider all boxes.
+  optional float confidence_threshold = 9;
+  // If true, visualize the detection results.
+  optional bool visualize = 10 [default = false];
+  // The threshold used to visualize the detection results.
+  optional float visualize_threshold = 11;
 }

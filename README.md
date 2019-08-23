@@ -1,39 +1,74 @@
-# Caffe
+# Cambricon Caffe
+To support Cambricon deep learning processor, the open source deep learning programming framework [BVLC-Caffe](https://github.com/BVLC/caffe) has been modified. New functions such as off-line multi-core inference, online fusion mode, support of multiple cards and others are developed. Cambricon Caffe focus on inference, it is dedicated to improving [BVLC-Caffe](https://github.com/BVLC/caffe) performance when running on Machine Learning Unit(MLU).
 
-[![Build Status](https://travis-ci.org/BVLC/caffe.svg?branch=master)](https://travis-ci.org/BVLC/caffe)
-[![License](https://img.shields.io/badge/license-BSD-blue.svg)](LICENSE)
+## Prerequisites
+Cambricon Caffe has several dependencies as same as [BVLC-Caffe](https://github.com/BVLC/caffe) does, please refer to [caffe.berkeleyvision.org](https://caffe.berkeleyvision.org/installation.html) for details.
 
-Caffe is a deep learning framework made with expression, speed, and modularity in mind.
-It is developed by Berkeley AI Research ([BAIR](http://bair.berkeley.edu))/The Berkeley Vision and Learning Center (BVLC) and community contributors.
+## Building
+You need to firstly clone [Cambricon Caffe](https://github.com/Cambricon/caffe), and then go to **scripts** folder to compile Cambricon Caffe: 
+```
+git clone git@github.com:Cambricon/caffe.git
+cd caffe/scripts
+```
+To build Cambricon Caffe, you could use **build_cambriconcaffe.sh**, which is in the scripts folder. It has three options:
+- -debug: build Cambricon Caffe with debug information.
+- -release: build Cambricon Caffe for production environment. This is the default build type.
+- -platform: specify platform argument. Supported arguments are x86, arm32, arm64. Default platform is x86.
 
-Check out the [project site](http://caffe.berkeleyvision.org) for all the details like
+### x86
+```
+./build_cambriconcaffe.sh -platform x86
+```
 
-- [DIY Deep Learning for Vision with Caffe](https://docs.google.com/presentation/d/1UeKXVgRvvxg9OUdh_UiC5G71UMscNPlvArsWER41PsU/edit#slide=id.p)
-- [Tutorial Documentation](http://caffe.berkeleyvision.org/tutorial/)
-- [BAIR reference models](http://caffe.berkeleyvision.org/model_zoo.html) and the [community model zoo](https://github.com/BVLC/caffe/wiki/Model-Zoo)
-- [Installation instructions](http://caffe.berkeleyvision.org/installation.html)
+### arm32
+Please download [cross toolchain](https://releases.linaro.org), e.g. arm-linux-gnueabihf-4.8.3-201404, and set **CROSS_TOOLCHAIN_PATH** environment to point to the tool chain downloaded:
+```
+export CROSS_TOOLCHAIN_PATH=your_toolchain_path  // please replace your_toolchain_path with your actual path
+```
+There is another dependent library set **arm32_linux_lib**, which is necessary for the compiling of Cambricon Caffe. It has been pre-compiled and is available for downloading on Cambricon's FTP site. Please clone caffe_boost, then run **download_dependency.sh**. The script will help download it.
 
-and step-by-step examples.
+The download_dependency.sh script needs one argument. The argument meaning is listed below: 
+- 1: download arm32_linux_lib.
+- 2: download android_lib_r17b.
 
-## Custom distributions
+Firstly, download the library set.
+```
+git clone git@github.com:Cambricon/caffe_boost.git
+cd caffe_boost/scripts
+./download_dependency.sh 1
+```
+Then set **ARM32_LINUX_LIB_ROOT** environment variable for arm32_linux_lib:
+```
+export ARM32_LINUX_LIB_ROOT=your_lib_path  // please replace your_lib_path with your actual path
+```
+Once you have set up above two environment variables, you are ready to compile Cambricon Caffe for arm32 platform.
+```
+./build_cambriconcaffe.sh -platform arm32
+```
 
- - [Intel Caffe](https://github.com/BVLC/caffe/tree/intel) (Optimized for CPU and support for multi-node), in particular Xeon processors (HSW, BDW, SKX, Xeon Phi).
-- [OpenCL Caffe](https://github.com/BVLC/caffe/tree/opencl) e.g. for AMD or Intel devices.
-- [Windows Caffe](https://github.com/BVLC/caffe/tree/windows)
-
-## Community
-
-[![Join the chat at https://gitter.im/BVLC/caffe](https://badges.gitter.im/Join%20Chat.svg)](https://gitter.im/BVLC/caffe?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
-
-Please join the [caffe-users group](https://groups.google.com/forum/#!forum/caffe-users) or [gitter chat](https://gitter.im/BVLC/caffe) to ask questions and talk about methods and models.
-Framework development discussions and thorough bug reports are collected on [Issues](https://github.com/BVLC/caffe/issues).
-
-Happy brewing!
+### arm64
+For arm64, please download **android-ndk-r17b** firstly, it can be downloaded from [NDK's](https://developer.android.google.cn/ndk) official website. Then set **ARM64_R17_NDK_ROOT** environment for it:
+```
+export ARM64_R17_NDK_ROOT=your_ndk_path  // please replace your_ndk_path with your actual path
+```
+There is another dependent library set **android_lib_r17b**. It also has been pre-compiled and is available for downloading on Cambricon's FTP site. Please input parameter **2** for download_dependency.sh.
+```
+git clone git@github.com:Cambricon/caffe_boost.git
+cd caffe_boost/scripts
+./download_dependency.sh 2
+```
+Finally, set **ARM64_R17_ANDROID_LIB_ROOT** environment variable for android_lib_r17b: 
+```
+export ARM64_R17_ANDROID_LIB_ROOT=your_android_lib_path  // please replace your_android_lib_path with your actual path
+```
+Once you have finished setting the environment variables, you could compile Cambricon Caffe for arm64 platform:
+```
+./build_cambriconcaffe.sh -platform arm64
+```
 
 ## License and Citation
-
 Caffe is released under the [BSD 2-Clause license](https://github.com/BVLC/caffe/blob/master/LICENSE).
-The BAIR/BVLC reference models are released for unrestricted use.
+The BVLC reference models are released for unrestricted use.
 
 Please cite Caffe in your publications if it helps your research:
 
@@ -42,4 +77,45 @@ Please cite Caffe in your publications if it helps your research:
       Journal = {arXiv preprint arXiv:1408.5093},
       Title = {Caffe: Convolutional Architecture for Fast Feature Embedding},
       Year = {2014}
+    }
+
+***
+ *Other names and brands may be claimed as the property of others
+
+# SSD: Single Shot MultiBox Detector
+This repository contains merged code issued as pull request to BVLC caffe written by:
+[Wei Liu](http://www.cs.unc.edu/~wliu/), [Dragomir Anguelov](https://www.linkedin.com/in/dragomiranguelov), [Dumitru Erhan](http://research.google.com/pubs/DumitruErhan.html), [Christian Szegedy](http://research.google.com/pubs/ChristianSzegedy.html), [Scott Reed](http://www-personal.umich.edu/~reedscot/), [Cheng-Yang Fu](http://www.cs.unc.edu/~cyfu/), [Alexander C. Berg](http://acberg.com).
+
+Original branch can be found at https://github.com/weiliu89/caffe/tree/ssd.
+
+Read our [wiki page](https://github.com/intel/caffe/wiki/SSD:-Single-Shot-MultiBox-Detector) for more details.
+
+# Darknet
+If you use Darknet in your research please cite it!
+
+    @misc{darknet13,
+      author =   {Joseph Redmon},
+      title =    {Darknet: Open Source Neural Networks in C},
+      howpublished = {\url{http://pjreddie.com/darknet/}},
+      year = {2013--2016}
+    }
+
+# YOLOv2
+If you use YOLOv2 in your work please cite it!
+
+    @article{redmon2016yolo9000,
+      title={YOLO9000: Better, Faster, Stronger},
+      author={Redmon, Joseph and Farhadi, Ali},
+      journal={arXiv preprint arXiv:1612.08242},
+      year={2016}
+    }
+
+# YOLOv3
+If you use YOLOv3 in your work please cite it!
+
+    @article{yolov3,
+      title={YOLOv3: An Incremental Improvement},
+      author={Redmon, Joseph and Farhadi, Ali},
+      journal = {arXiv},
+      year={2018}
     }

@@ -1,3 +1,32 @@
+/*
+All modification made by Cambricon Corporation: © 2018--2019 Cambricon Corporation
+All rights reserved.
+All other contributions:
+Copyright (c) 2014--2018, the respective contributors
+All rights reserved.
+For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+    * Redistributions of source code must retain the above copyright notice,
+      this list of conditions and the following disclaimer.
+    * Redistributions in binary form must reproduce the above copyright
+      notice, this list of conditions and the following disclaimer in the
+      documentation and/or other materials provided with the distribution.
+    * Neither the name of Intel Corporation nor the names of its contributors
+      may be used to endorse or promote products derived from this software
+      without specific prior written permission.
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+*/
+
 #include <google/protobuf/io/coded_stream.h>
 #include <google/protobuf/io/zero_copy_stream_impl.h>
 #include <google/protobuf/text_format.h>
@@ -16,6 +45,83 @@ bool NetNeedsUpgrade(const NetParameter& net_param) {
   return NetNeedsV0ToV1Upgrade(net_param) || NetNeedsV1ToV2Upgrade(net_param)
       || NetNeedsDataUpgrade(net_param) || NetNeedsInputUpgrade(net_param)
       || NetNeedsBatchNormUpgrade(net_param);
+}
+
+#ifdef USE_MLU
+bool IsInt8Net(const NetParameter& param) {
+  for (int i = 0; i < param.layer_size(); i++) {
+    if (param.layer(i).blobs_dtype().size() != 0 ||
+        param.layer(i).bottom_mlu_dtype().size() != 0)
+      return true;
+  }
+  return false;
+}
+
+bool NetNeedsSsdOptimization(const NetParameter& net_param) {
+  for (int i = net_param.layer_size() - 1; i >= 0; i--) {
+    if (net_param.layer(i).type() == "DetectionOutput" ||
+        net_param.layer(i).type() == "DetectionPoseOutput") {
+      return true;
+    }
+  }
+  return false;
+}
+
+void ParseNetSsdLocParameter(const NetParameter& param,
+    vector<string>* ssd_bottoms,
+    vector<int>* dropped_layers,
+    string bottom_blob) {
+  for (int j = 0; j < param.layer_size(); j++) {
+    // concat
+    if (param.layer(j).top(0) == bottom_blob) {
+      (*dropped_layers)[j] = 1;
+      for (int k = 0; k < param.layer(j).bottom_size(); k++) {
+        // concat -> flatten layer
+        int index = NetGetLayerIndexByTopName(param, param.layer(j).bottom(k));
+        (*dropped_layers)[index] = 1;
+        string flatten_blob = param.layer(index).bottom(0);
+        // flatten layer -> permute layer
+        index = NetGetLayerIndexByTopName(param, flatten_blob);
+        (*dropped_layers)[index] = 1;
+        ssd_bottoms->push_back(param.layer(index).bottom(0));
+      }
+    }
+  }
+}
+
+void ParseNetSsdConfParameter(const NetParameter& param,
+    vector<string>* ssd_bottoms,
+    vector<int>* dropped_layers,
+    string bottom_blob) {
+  for (int j = 0; j < param.layer_size(); j++) {
+    if (param.layer(j).top(0) == bottom_blob) {
+      (*dropped_layers)[j] = 1;
+      int index = NetGetLayerIndexByTopName(param, param.layer(j).bottom(0));
+      (*dropped_layers)[index] = 1;
+      index = NetGetLayerIndexByTopName(param, param.layer(index).bottom(0));
+      (*dropped_layers)[index] = 1;
+      // concat
+      index = NetGetLayerIndexByTopName(param, param.layer(index).bottom(0));
+      (*dropped_layers)[index] = 1;
+      for (int p = 0; p < param.layer(index).bottom_size(); p++) {
+        int ind = NetGetLayerIndexByTopName(param, param.layer(index).bottom(p));
+        (*dropped_layers)[ind] = 1;
+        ind = NetGetLayerIndexByTopName(param, param.layer(ind).bottom(0));
+        (*dropped_layers)[ind] = 1;
+        ssd_bottoms->push_back(param.layer(ind).bottom(0));
+      }
+    }
+  }
+}
+
+#endif
+
+int NetGetLayerIndexByTopName(const NetParameter& net_param, const string top) {
+  for (int i = 0; i < net_param.layer_size() - 1; i++) {
+    if (net_param.layer(i).top(0) == top)
+      return i;
+  }
+  return -1;
 }
 
 bool UpgradeNetAsNeeded(const string& param_file, NetParameter* param) {
@@ -83,18 +189,127 @@ bool UpgradeNetAsNeeded(const string& param_file, NetParameter* param) {
   return success;
 }
 
+#ifdef USE_MLU
+void HackInplaceBlobs(NetParameter* param) {
+  for (int layer_id = 1; layer_id < param->layer_size(); layer_id++) {
+    string top_name;
+    int flag = 0;
+    string new_name;
+    int layer_bottom_size = param->layer(layer_id).bottom_size();
+    int layer_top_size = param->layer(layer_id).top_size();
+    for (int bottom_id = 0; bottom_id < layer_bottom_size; bottom_id++) {
+      for (int top_id = 0; top_id < layer_top_size; top_id++) {
+        if (param->layer(layer_id).bottom(bottom_id) ==
+            param->layer(layer_id).top(top_id)) {
+          CHECK(bottom_id == top_id)<< "bottom id should be the same ad top id";
+          top_name = param->layer(layer_id).top(top_id);
+          std::stringstream ss;
+          ss << top_name << "_inp";
+          ss >> new_name;
+          param->mutable_layer(layer_id)->set_top(top_id, new_name);
+          flag = 1;
+        }
+      }
+    }
+    if (flag) {
+      for (int next_layer_id = layer_id+1; next_layer_id < param->layer_size();
+          next_layer_id++) {
+        int next_layer_bottom_size = param->layer(next_layer_id).bottom_size();
+        for (int next_layer_bottom_id = 0;
+            next_layer_bottom_id < next_layer_bottom_size;
+            next_layer_bottom_id++) {
+          if (param->layer(next_layer_id).bottom(next_layer_bottom_id) ==
+              top_name) {
+            param->mutable_layer(next_layer_id)->
+              set_bottom(next_layer_bottom_id, new_name);
+          }
+        }
+        int next_layer_top_size = param->layer(next_layer_id).top_size();
+        for (int next_layer_top_id = 0; next_layer_top_id < next_layer_top_size;
+            next_layer_top_id++) {
+          if (param->layer(next_layer_id).top(next_layer_top_id) ==
+              top_name) {
+            param->mutable_layer(next_layer_id)->
+              set_top(next_layer_top_id, new_name);
+          }
+        }
+      }
+    }
+  }
+}
+void HackShapeAccordingToParallel(NetParameter* param) {
+  // network input size should be muliplied by data parallel. So input shape, DataLayer
+  // and ImageDataLayer should be adjusted.
+
+  // handle layers act as inputs
+#define HACK_BATCH_SIZE(param)                                            \
+  do {                                                                    \
+    if (layer->has_##param()) {                                           \
+      auto lp = layer->mutable_##param();                                 \
+      lp->set_batch_size(lp->batch_size() * Caffe::data_parallel());      \
+      LOG(WARNING) << "setting N dim of layer " << layer->name()          \
+                   << " to " << lp->batch_size() << " in multicore mode"; \
+    }                                                                     \
+  } while (0)
+
+  for (int i = 0; i < param->layer_size(); i++) {
+    auto layer = param->mutable_layer(i);
+    HACK_BATCH_SIZE(data_param);
+    HACK_BATCH_SIZE(hdf5_data_param);
+    HACK_BATCH_SIZE(image_data_param);
+    HACK_BATCH_SIZE(memory_data_param);
+
+    // handle input parameter
+    if (param->layer(i).has_input_param()) {
+      for (int j = 0; j < param->layer(i).input_param().shape_size(); j++) {
+        auto shape = param->mutable_layer(i)->mutable_input_param()->mutable_shape(j);
+        if (shape->dim_size() >= 1) {
+          // NCHW only!
+          shape->set_dim(0, shape->dim(0) * Caffe::data_parallel());
+        }
+      }
+    }
+  }
+
+#undef HACK_BATCH_SIZE
+}
+#endif
+
 void ReadNetParamsFromTextFileOrDie(const string& param_file,
                                     NetParameter* param) {
   CHECK(ReadProtoFromTextFile(param_file, param))
       << "Failed to parse NetParameter file: " << param_file;
   UpgradeNetAsNeeded(param_file, param);
+#ifdef USE_MLU
+  HackInplaceBlobs(param);
+  HackShapeAccordingToParallel(param);
+  if (Caffe::mode() == Caffe::CPU)
+    LOG(WARNING) << "Warning:Using CPU, fake data may be appended!";
+#endif
 }
 
-void ReadNetParamsFromBinaryFileOrDie(const string& param_file,
-                                      NetParameter* param) {
+void ReadNetParamsFromBinaryFileOrDie(const string& param_file, NetParameter* param) {
   CHECK(ReadProtoFromBinaryFile(param_file, param))
       << "Failed to parse NetParameter file: " << param_file;
   UpgradeNetAsNeeded(param_file, param);
+}
+
+void ReadNetParamsFromTextMemOrDie(void* buffer, int buffer_size,
+    NetParameter* param) {
+  CHECK(ReadProtoFromTextMem(buffer, buffer_size, param))
+      << "Failed to parse NetParameter mem ";
+  UpgradeNetAsNeeded((const string)"buffer", param);
+#ifdef USE_MLU
+  HackInplaceBlobs(param);
+  HackShapeAccordingToParallel(param);
+#endif
+}
+
+void ReadNetParamsFromBinaryMemOrDie(void* buffer, int buffer_size,
+                                     NetParameter* param) {
+  CHECK(ReadProtoFromBinaryMem(buffer, buffer_size, param))
+  << "Fialed to parse NetParameter mem";
+  UpgradeNetAsNeeded((const string)"buffer", param);
 }
 
 bool NetNeedsV0ToV1Upgrade(const NetParameter& net_param) {
@@ -832,10 +1047,6 @@ bool UpgradeV1LayerParameter(const V1LayerParameter& v1_layer_param,
     layer_param->mutable_relu_param()->CopyFrom(
         v1_layer_param.relu_param());
   }
-  if (v1_layer_param.has_sigmoid_param()) {
-    layer_param->mutable_sigmoid_param()->CopyFrom(
-        v1_layer_param.sigmoid_param());
-  }
   if (v1_layer_param.has_softmax_param()) {
     layer_param->mutable_softmax_param()->CopyFrom(
         v1_layer_param.softmax_param());
@@ -843,10 +1054,6 @@ bool UpgradeV1LayerParameter(const V1LayerParameter& v1_layer_param,
   if (v1_layer_param.has_slice_param()) {
     layer_param->mutable_slice_param()->CopyFrom(
         v1_layer_param.slice_param());
-  }
-  if (v1_layer_param.has_tanh_param()) {
-    layer_param->mutable_tanh_param()->CopyFrom(
-        v1_layer_param.tanh_param());
   }
   if (v1_layer_param.has_threshold_param()) {
     layer_param->mutable_threshold_param()->CopyFrom(
@@ -863,6 +1070,30 @@ bool UpgradeV1LayerParameter(const V1LayerParameter& v1_layer_param,
   if (v1_layer_param.has_loss_param()) {
     layer_param->mutable_loss_param()->CopyFrom(
         v1_layer_param.loss_param());
+  }
+  // add cambricon param
+  // if (v1_layer_param.has_bottom_mlu_dtype()) {
+  //  layer_param->mutable_bottom_mlu_dtype()->CopyFrom(
+  //      v1_layer_param.bottom_mlu_dtype());
+  // }
+
+  for (int i = 0; i < v1_layer_param.bottom_mlu_dtype_size(); ++i) {
+    layer_param->add_bottom_mlu_dtype();
+    layer_param->mutable_bottom_mlu_dtype(i)->
+      CopyFrom(v1_layer_param.bottom_mlu_dtype(i));
+  }
+  // if (v1_layer_param.has_split_num()) {
+  //  layer_param->mutable_split_num()->CopyFrom(
+  //      v1_layer_param.split_num());
+  // }
+  // if (v1_layer_param.has_sparsity()) {
+  //  layer_param->mutable_sparsity()->CopyFrom(
+  //      v1_layer_param.sparsity());
+  // }
+  for (int i = 0; i < v1_layer_param.blobs_dtype_size(); ++i) {
+    layer_param->add_blobs_dtype();
+    layer_param->mutable_blobs_dtype(i)->
+      CopyFrom(v1_layer_param.blobs_dtype(i));
   }
   if (v1_layer_param.has_layer()) {
     LOG(ERROR) << "Input NetParameter has V0 layer -- ignoring.";

@@ -1,3 +1,32 @@
+/*
+All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All rights reserved.
+All other contributions:
+Copyright (c) 2014--2018, the respective contributors
+All rights reserved.
+For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+    * Redistributions of source code must retain the above copyright notice,
+      this list of conditions and the following disclaimer.
+    * Redistributions in binary form must reproduce the above copyright
+      notice, this list of conditions and the following disclaimer in the
+      documentation and/or other materials provided with the distribution.
+    * Neither the name of Intel Corporation nor the names of its contributors
+      may be used to endorse or promote products derived from this software
+      without specific prior written permission.
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+*/
+
 #include <string>
 #include <vector>
 
@@ -17,27 +46,27 @@
 namespace caffe {
 
 class PaddingLayerUpgradeTest : public ::testing::Test {
- protected:
-  void RunPaddingUpgradeTest(
-      const string& input_param_string, const string& output_param_string) {
+  protected:
+  void RunPaddingUpgradeTest(const string& input_param_string,
+                             const string& output_param_string) {
     // Test that UpgradeV0PaddingLayers called on the proto specified by
     // input_param_string results in the proto specified by
     // output_param_string.
     NetParameter input_param;
-    CHECK(google::protobuf::TextFormat::ParseFromString(
-        input_param_string, &input_param));
+    CHECK(google::protobuf::TextFormat::ParseFromString(input_param_string,
+                                                        &input_param));
     NetParameter expected_output_param;
     CHECK(google::protobuf::TextFormat::ParseFromString(
         output_param_string, &expected_output_param));
     NetParameter actual_output_param;
     UpgradeV0PaddingLayers(input_param, &actual_output_param);
     EXPECT_EQ(expected_output_param.DebugString(),
-        actual_output_param.DebugString());
+              actual_output_param.DebugString());
     // Also test idempotence.
     NetParameter double_pad_upgrade_param;
     UpgradeV0PaddingLayers(actual_output_param, &double_pad_upgrade_param);
     EXPECT_EQ(actual_output_param.DebugString(),
-       double_pad_upgrade_param.DebugString());
+              double_pad_upgrade_param.DebugString());
   }
 };
 
@@ -1087,39 +1116,39 @@ TEST_F(PaddingLayerUpgradeTest, TestImageNet) {
 }
 
 class NetUpgradeTest : public ::testing::Test {
- protected:
-  void RunV0UpgradeTest(
-      const string& input_param_string, const string& output_param_string) {
+  protected:
+  void RunV0UpgradeTest(const string& input_param_string,
+                        const string& output_param_string) {
     // Test that UpgradeV0Net called on the NetParameter proto specified by
     // input_param_string results in the NetParameter proto specified by
     // output_param_string.
     NetParameter input_param;
-    CHECK(google::protobuf::TextFormat::ParseFromString(
-        input_param_string, &input_param));
+    CHECK(google::protobuf::TextFormat::ParseFromString(input_param_string,
+                                                        &input_param));
     NetParameter expected_output_param;
     CHECK(google::protobuf::TextFormat::ParseFromString(
         output_param_string, &expected_output_param));
     NetParameter actual_output_param;
     UpgradeV0Net(input_param, &actual_output_param);
     EXPECT_EQ(expected_output_param.DebugString(),
-        actual_output_param.DebugString());
+              actual_output_param.DebugString());
   }
 
-  void RunV1UpgradeTest(
-      const string& input_param_string, const string& output_param_string) {
+  void RunV1UpgradeTest(const string& input_param_string,
+                        const string& output_param_string) {
     // Test that UpgradeV0Net called on the NetParameter proto specified by
     // input_param_string results in the NetParameter proto specified by
     // output_param_string.
     NetParameter input_param;
-    CHECK(google::protobuf::TextFormat::ParseFromString(
-        input_param_string, &input_param));
+    CHECK(google::protobuf::TextFormat::ParseFromString(input_param_string,
+                                                        &input_param));
     NetParameter expected_output_param;
     CHECK(google::protobuf::TextFormat::ParseFromString(
         output_param_string, &expected_output_param));
     NetParameter actual_output_param;
     UpgradeV1Net(input_param, &actual_output_param);
     EXPECT_EQ(expected_output_param.DebugString(),
-        actual_output_param.DebugString());
+              actual_output_param.DebugString());
   }
 };
 
@@ -2890,7 +2919,7 @@ TEST_F(NetUpgradeTest, TestImageNet) {
       "} ";
   this->RunV1UpgradeTest(expected_v1_proto, expected_v2_proto);
 }  // NOLINT(readability/fn_size)
-
+/*
 TEST_F(NetUpgradeTest, TestUpgradeV1LayerType) {
   LayerParameter layer_param;
   shared_ptr<Layer<float> > layer;
@@ -2925,30 +2954,30 @@ TEST_F(NetUpgradeTest, TestUpgradeV1LayerType) {
     EXPECT_EQ(v2_layer_type, layer->type());
   }
 }
-
+*/
 class SolverTypeUpgradeTest : public ::testing::Test {
- protected:
-  void RunSolverTypeUpgradeTest(
-      const string& input_param_string, const string& output_param_string) {
+  protected:
+  void RunSolverTypeUpgradeTest(const string& input_param_string,
+                                const string& output_param_string) {
     // Test upgrading old solver_type field (enum) to new type field (string)
     SolverParameter input_param;
-    CHECK(google::protobuf::TextFormat::ParseFromString(
-        input_param_string, &input_param));
+    CHECK(google::protobuf::TextFormat::ParseFromString(input_param_string,
+                                                        &input_param));
     SolverParameter expected_output_param;
     CHECK(google::protobuf::TextFormat::ParseFromString(
         output_param_string, &expected_output_param));
     SolverParameter actual_output_param = input_param;
     UpgradeSolverType(&actual_output_param);
     EXPECT_EQ(expected_output_param.DebugString(),
-        actual_output_param.DebugString());
+              actual_output_param.DebugString());
   }
 };
 
 TEST_F(SolverTypeUpgradeTest, TestSimple) {
-  const char* old_type_vec[6] = { "SGD", "ADAGRAD", "NESTEROV", "RMSPROP",
-      "ADADELTA", "ADAM" };
-  const char* new_type_vec[6] = { "SGD", "AdaGrad", "Nesterov", "RMSProp",
-      "AdaDelta", "Adam" };
+  const char* old_type_vec[6] = {"SGD",     "ADAGRAD",  "NESTEROV",
+                                 "RMSPROP", "ADADELTA", "ADAM"};
+  const char* new_type_vec[6] = {"SGD",     "AdaGrad",  "Nesterov",
+                                 "RMSProp", "AdaDelta", "Adam"};
   for (int i = 0; i < 6; ++i) {
     const string& input_proto =
         "net: 'examples/mnist/lenet_train_test.prototxt' "
@@ -2965,7 +2994,8 @@ TEST_F(SolverTypeUpgradeTest, TestSimple) {
         "snapshot: 5000 "
         "snapshot_prefix: 'examples/mnist/lenet_rmsprop' "
         "solver_mode: GPU "
-        "solver_type: " + std::string(old_type_vec[i]) + " ";
+        "solver_type: " +
+        std::string(old_type_vec[i]) + " ";
     const string& expected_output_proto =
         "net: 'examples/mnist/lenet_train_test.prototxt' "
         "test_iter: 100 "
@@ -2981,7 +3011,8 @@ TEST_F(SolverTypeUpgradeTest, TestSimple) {
         "snapshot: 5000 "
         "snapshot_prefix: 'examples/mnist/lenet_rmsprop' "
         "solver_mode: GPU "
-        "type: '" + std::string(new_type_vec[i]) + "' ";
+        "type: '" +
+        std::string(new_type_vec[i]) + "' ";
     this->RunSolverTypeUpgradeTest(input_proto, expected_output_proto);
   }
 }

@@ -5,7 +5,7 @@ set(Caffe_DEFINITIONS "")
 set(Caffe_COMPILE_OPTIONS "")
 
 # ---[ Boost
-find_package(Boost 1.54 REQUIRED COMPONENTS system thread filesystem)
+find_package(Boost 1.53 REQUIRED COMPONENTS system thread filesystem regex)
 list(APPEND Caffe_INCLUDE_DIRS PUBLIC ${Boost_INCLUDE_DIRS})
 list(APPEND Caffe_LINKER_LIBS PUBLIC ${Boost_LIBRARIES})
 
@@ -43,9 +43,12 @@ list(APPEND Caffe_LINKER_LIBS PUBLIC ${GFLAGS_LIBRARIES})
 include(cmake/ProtoBuf.cmake)
 
 # ---[ HDF5
-find_package(HDF5 COMPONENTS HL REQUIRED)
-list(APPEND Caffe_INCLUDE_DIRS PUBLIC ${HDF5_INCLUDE_DIRS})
-list(APPEND Caffe_LINKER_LIBS PUBLIC ${HDF5_LIBRARIES} ${HDF5_HL_LIBRARIES})
+if(USE_HDF5)
+  find_package(HDF5 COMPONENTS HL REQUIRED)
+  list(APPEND Caffe_INCLUDE_DIRS PUBLIC ${HDF5_INCLUDE_DIRS})
+  list(APPEND Caffe_LINKER_LIBS PUBLIC ${HDF5_LIBRARIES} ${HDF5_HL_LIBRARIES})
+  list(APPEND Caffe_DEFINITIONS PUBLIC -DUSE_HDF5)
+endif()
 
 # ---[ LMDB
 if(USE_LMDB)
@@ -73,16 +76,37 @@ if(USE_LEVELDB)
   list(APPEND Caffe_LINKER_LIBS PRIVATE ${Snappy_LIBRARIES})
 endif()
 
-# ---[ CUDA
-include(cmake/Cuda.cmake)
-if(NOT HAVE_CUDA)
-  if(CPU_ONLY)
-    message(STATUS "-- CUDA is disabled. Building without it...")
-  else()
-    message(WARNING "-- CUDA is not detected by cmake. Building without it...")
-  endif()
+# ---[ MLU
+if(USE_MLU)
+  find_package(MLU REQUIRED)
+  include_directories(SYSTEM ${CNML_INCLUDE_DIR})
+  include_directories(SYSTEM ${CNRT_INCLUDE_DIR})
+  list(APPEND Caffe_LINKER_LIBS  PUBLIC ${CNML_LIBRARY})
+  list(APPEND Caffe_LINKER_LIBS  PUBLIC ${CNRT_LIBRARY})
+  list(APPEND Caffe_DEFINITIONS PUBLIC -DUSE_MLU)
+  execute_process(COMMAND ${CMAKE_SOURCE_DIR}/scripts/install_githook.sh)
+endif()
 
-  list(APPEND Caffe_DEFINITIONS PUBLIC -DCPU_ONLY)
+# ---[ Test Code Coverage
+if(TEST_COVERAGE)
+  SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fprofile-arcs -ftest-coverage")
+endif()
+
+# ---[ CUDA
+if(USE_CUDA)
+  include(cmake/Cuda.cmake)
+  if(NOT HAVE_CUDA)
+    message(ERROR "Can not find cuda")
+  endif()
+  list(APPEND Caffe_DEFINITIONS PUBLIC -DUSE_CUDA)
+endif()
+
+if(CROSS_COMPILE)
+  list(APPEND Caffe_DEFINITIONS PUBLIC -DCROSS_COMPILE)
+endif()
+
+if(CROSS_COMPILE_ARM64)
+  list(APPEND Caffe_DEFINITIONS PUBLIC -DCROSS_COMPILE_ARM64)
 endif()
 
 if(USE_NCCL)
@@ -94,9 +118,14 @@ endif()
 
 # ---[ OpenCV
 if(USE_OPENCV)
-  find_package(OpenCV QUIET COMPONENTS core highgui imgproc imgcodecs)
+  if(${CAMBRICOM_DRIVER_TYPE} MATCHES "mango_armv7")
+    set(OPENCV_COMMON_DEPENDENCY core highgui imgproc videoio)
+  else()
+    set(OPENCV_COMMON_DEPENDENCY core highgui imgproc)
+  endif()
+  find_package(OpenCV QUIET COMPONENTS ${OPENCV_COMMON_DEPENDENCY} imgcodecs)
   if(NOT OpenCV_FOUND) # if not OpenCV 3.x, then imgcodecs are not found
-    find_package(OpenCV REQUIRED COMPONENTS core highgui imgproc)
+    find_package(OpenCV REQUIRED COMPONENTS ${OPENCV_COMMON_DEPENDENCY})
   endif()
   list(APPEND Caffe_INCLUDE_DIRS PUBLIC ${OpenCV_INCLUDE_DIRS})
   list(APPEND Caffe_LINKER_LIBS PUBLIC ${OpenCV_LIBS})
@@ -106,7 +135,11 @@ endif()
 
 # ---[ BLAS
 if(NOT APPLE)
-  set(BLAS "Atlas" CACHE STRING "Selected BLAS library")
+  if(NOT ANDROID_ABI)
+    set(BLAS "Open" CACHE STRING "Selected BLAS library")
+  else()
+    set(BLAS "Atlas" CACHE STRING "Selected BLAS library")
+  endif()
   set_property(CACHE BLAS PROPERTY STRINGS "Atlas;Open;MKL")
 
   if(BLAS STREQUAL "Atlas" OR BLAS STREQUAL "atlas")
@@ -201,3 +234,5 @@ endif()
 if(BUILD_docs)
   find_package(Doxygen)
 endif()
+
+

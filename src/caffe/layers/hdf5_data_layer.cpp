@@ -1,4 +1,34 @@
 /*
+All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All rights reserved.
+All other contributions:
+Copyright (c) 2014--2018, the respective contributors
+All rights reserved.
+For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+    * Redistributions of source code must retain the above copyright notice,
+      this list of conditions and the following disclaimer.
+    * Redistributions in binary form must reproduce the above copyright
+      notice, this list of conditions and the following disclaimer in the
+      documentation and/or other materials provided with the distribution.
+    * Neither the name of Intel Corporation nor the names of its contributors
+      may be used to endorse or promote products derived from this software
+      without specific prior written permission.
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+*/
+
+#ifdef USE_HDF5
+/*
 TODO:
 - load file in a separate thread ("prefetch")
 - can be smarter about the memcpy call instead of doing it row-by-row
@@ -7,12 +37,13 @@ TODO:
 - add ability to shuffle filenames if flag is set
 */
 #include <fstream>  // NOLINT(readability/streams)
+#include <memory>  // NOLINT
 #include <string>
 #include <vector>
 
-#include "hdf5.h"
-#include "hdf5_hl.h"
-#include "stdint.h"
+#include "hdf5.h" // NOLINT
+#include "hdf5_hl.h" // NOLINT
+#include "stdint.h" // NOLINT
 
 #include "caffe/layers/hdf5_data_layer.hpp"
 #include "caffe/util/hdf5.hpp"
@@ -20,7 +51,7 @@ TODO:
 namespace caffe {
 
 template <typename Dtype>
-HDF5DataLayer<Dtype>::~HDF5DataLayer<Dtype>() { }
+HDF5DataLayer<Dtype>::~HDF5DataLayer<Dtype>() {}
 
 // Load data and label from HDF5 filename into the class property blobs.
 template <typename Dtype>
@@ -41,7 +72,7 @@ void HDF5DataLayer<Dtype>::LoadHDF5FileData(const char* filename) {
     hdf_blobs_[i] = shared_ptr<Blob<Dtype> >(new Blob<Dtype>());
     // Allow reshape here, as we are loading data not params
     hdf5_load_nd_dataset(file_id, this->layer_param_.top(i).c_str(),
-        MIN_DATA_DIM, MAX_DATA_DIM, hdf_blobs_[i].get(), true);
+                         MIN_DATA_DIM, MAX_DATA_DIM, hdf_blobs_[i].get(), true);
   }
 
   herr_t status = H5Fclose(file_id);
@@ -56,8 +87,7 @@ void HDF5DataLayer<Dtype>::LoadHDF5FileData(const char* filename) {
   // Default to identity permutation.
   data_permutation_.clear();
   data_permutation_.resize(hdf_blobs_[0]->shape(0));
-  for (int i = 0; i < hdf_blobs_[0]->shape(0); i++)
-    data_permutation_[i] = i;
+  for (int i = 0; i < hdf_blobs_[0]->shape(0); i++) data_permutation_[i] = i;
 
   // Shuffle if needed.
   if (this->layer_param_.hdf5_data_param().shuffle()) {
@@ -71,10 +101,10 @@ void HDF5DataLayer<Dtype>::LoadHDF5FileData(const char* filename) {
 
 template <typename Dtype>
 void HDF5DataLayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& bottom,
-      const vector<Blob<Dtype>*>& top) {
+                                      const vector<Blob<Dtype>*>& top) {
   // Refuse transformation parameters since HDF5 is totally generic.
-  CHECK(!this->layer_param_.has_transform_param()) <<
-      this->type() << " does not transform data.";
+  CHECK(!this->layer_param_.has_transform_param())
+      << this->type() << " does not transform data.";
   // Read the source to parse the filenames.
   const string& source = this->layer_param_.hdf5_data_param().source();
   LOG(INFO) << "Loading list of HDF5 filenames from: " << source;
@@ -93,7 +123,7 @@ void HDF5DataLayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& bottom,
   current_file_ = 0;
   LOG(INFO) << "Number of HDF5 files: " << num_files_;
   CHECK_GE(num_files_, 1) << "Must have at least 1 HDF5 filename listed in "
-    << source;
+                          << source;
 
   file_permutation_.clear();
   file_permutation_.resize(num_files_);
@@ -135,7 +165,7 @@ bool HDF5DataLayer<Dtype>::Skip() {
   return !keep;
 }
 
-template<typename Dtype>
+template <typename Dtype>
 void HDF5DataLayer<Dtype>::Next() {
   if (++current_row_ == hdf_blobs_[0]->shape(0)) {
     if (num_files_ > 1) {
@@ -149,7 +179,7 @@ void HDF5DataLayer<Dtype>::Next() {
         DLOG(INFO) << "Looping around to first file.";
       }
       LoadHDF5FileData(
-        hdf_filenames_[file_permutation_[current_file_]].c_str());
+          hdf_filenames_[file_permutation_[current_file_]].c_str());
     }
     current_row_ = 0;
     if (this->layer_param_.hdf5_data_param().shuffle())
@@ -160,7 +190,7 @@ void HDF5DataLayer<Dtype>::Next() {
 
 template <typename Dtype>
 void HDF5DataLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom,
-      const vector<Blob<Dtype>*>& top) {
+                                       const vector<Blob<Dtype>*>& top) {
   const int batch_size = this->layer_param_.hdf5_data_param().batch_size();
   for (int i = 0; i < batch_size; ++i) {
     while (Skip()) {
@@ -169,14 +199,15 @@ void HDF5DataLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom,
     for (int j = 0; j < this->layer_param_.top_size(); ++j) {
       int data_dim = top[j]->count() / top[j]->shape(0);
       caffe_copy(data_dim,
-          &hdf_blobs_[j]->cpu_data()[data_permutation_[current_row_]
-            * data_dim], &top[j]->mutable_cpu_data()[i * data_dim]);
+                 &hdf_blobs_[j]
+                      ->cpu_data()[data_permutation_[current_row_] * data_dim],
+                 &top[j]->mutable_cpu_data()[i * data_dim]);
     }
     Next();
   }
 }
 
-#ifdef CPU_ONLY
+#ifndef USE_CUDA
 STUB_GPU_FORWARD(HDF5DataLayer, Forward);
 #endif
 
@@ -184,3 +215,4 @@ INSTANTIATE_CLASS(HDF5DataLayer);
 REGISTER_LAYER_CLASS(HDF5Data);
 
 }  // namespace caffe
+#endif
