@@ -16,13 +16,15 @@ caffe_leave_only_selected_tests(test_cuda ${BUILD_only_tests})
 #caffe_configure_testdatafile(test_data/sample_data_list.txt)
 
 set(the_target test.testbin)
-set(test_args --gtest_shuffle)
+#set(test_args --gtest_shuffle)
+set(list_args --gtest_list_tests)
 
 if(HAVE_CUDA)
   caffe_cuda_compile(test_cuda_objs ${test_cuda})
   list(APPEND test_srcs ${test_cuda_objs} ${test_cuda})
 else()
-  list(APPEND test_args --gtest_filter="-*GPU*")
+  list(APPEND test_args --gtest_filter="-*GPU*"
+    --gtest_output="xml:gtest.xml")
 endif()
 
 # ---[ Adding test target
@@ -30,6 +32,10 @@ add_executable(${the_target} EXCLUDE_FROM_ALL ${test_srcs})
 target_link_libraries(${the_target} gtest ${Caffe_LINK})
 caffe_default_properties(${the_target})
 caffe_set_runtime_directory(${the_target} "${PROJECT_BINARY_DIR}/test")
+
+# ---[ Adding testlist
+add_custom_target(testlist COMMAND ${the_target} ${list_args}
+                          WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 
 # ---[ Adding runtest
 add_custom_target(runtest COMMAND ${the_target} ${test_args}

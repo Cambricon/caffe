@@ -1,3 +1,32 @@
+/*
+All modification made by Cambricon Corporation: © 2018--2019 Cambricon Corporation
+All rights reserved.
+All other contributions:
+Copyright (c) 2014--2018, the respective contributors
+All rights reserved.
+For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+    * Redistributions of source code must retain the above copyright notice,
+      this list of conditions and the following disclaimer.
+    * Redistributions in binary form must reproduce the above copyright
+      notice, this list of conditions and the following disclaimer in the
+      documentation and/or other materials provided with the distribution.
+    * Neither the name of Intel Corporation nor the names of its contributors
+      may be used to endorse or promote products derived from this software
+      without specific prior written permission.
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+*/
+
 #ifdef WITH_PYTHON_LAYER
 #include "boost/python.hpp"
 namespace bp = boost::python;
@@ -8,13 +37,18 @@ namespace bp = boost::python;
 
 #include <cstring>
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "boost/algorithm/string.hpp"
 #include "caffe/caffe.hpp"
+#include "caffe/compile.hpp"
+#include "caffe/util/format.hpp"
 #include "caffe/util/signal_handler.h"
-
+#ifdef USE_MLU
+#include "cnrt.h" //NOLINT
+#endif
 using caffe::Blob;
 using caffe::Caffe;
 using caffe::Net;
@@ -25,59 +59,81 @@ using caffe::string;
 using caffe::Timer;
 using caffe::vector;
 using std::ostringstream;
+using std::ofstream;
+using std::stringstream;
 
 DEFINE_string(gpu, "",
     "Optional; run in GPU mode on given device IDs separated by ','."
     "Use '-gpu all' to run on all available GPUs. The effective training "
     "batch size is multiplied by the number of devices.");
-DEFINE_string(solver, "",
-    "The solver definition protocol buffer text file.");
-DEFINE_string(model, "",
-    "The model definition protocol buffer text file.");
+DEFINE_int32(mludevice, 0,
+             "Optional; specify the MLU device ID, default: INT_MAX");
+DEFINE_string(mmode, "", "Optional; run in specific MLU mode.");
+DEFINE_string(mreshape, "SETUPONLY",
+    "Optional; specify the ReshapeMode when running on MLU.\n"
+    "ALWAYS    - reshape when layerSetUp and Forwad\n"
+    "SETUPONLY - reshape only when layerSetUp and Init\n"
+    "DETECT    - let caffe detects when need to reshape\n"
+    "            Note: DETECT is under *alpha* version not recomended");
+DEFINE_string(mname, "offline",
+    "The name for the offline model to be generated.");
+DEFINE_int32(model_parallel, 1,
+    "model parallel means one model runs in multicores");
+DEFINE_int32(data_parallel, 1,
+    "data_parallel means one data has multiple same models");
+DEFINE_string(mcore, "",
+    "Which core version you want to generate");
+DEFINE_string(solver, "", "The solver definition protocol buffer text file.");
+DEFINE_string(model, "", "The model definition protocol buffer text file.");
 DEFINE_string(phase, "",
-    "Optional; network phase (TRAIN or TEST). Only used for 'time'.");
-DEFINE_int32(level, 0,
-    "Optional; network level.");
+              "Optional; network phase (TRAIN or TEST). Only used for 'time'.");
+DEFINE_int32(level, 0, "Optional; network level.");
 DEFINE_string(stage, "",
-    "Optional; network stages (not to be confused with phase), "
-    "separated by ','.");
+              "Optional; network stages (not to be confused with phase), "
+              "separated by ','.");
 DEFINE_string(snapshot, "",
-    "Optional; the snapshot solver state to resume training.");
+              "Optional; the snapshot solver state to resume training.");
 DEFINE_string(weights, "",
-    "Optional; the pretrained weights to initialize finetuning, "
-    "separated by ','. Cannot be set simultaneously with snapshot.");
-DEFINE_int32(iterations, 50,
-    "The number of iterations to run.");
+              "Optional; the pretrained weights to initialize finetuning, "
+              "separated by ','. Cannot be set simultaneously with snapshot.");
+DEFINE_int32(iterations, 50, "The number of iterations to run.");
+DEFINE_int32(hd_reshape, 0, "Use hardware reshape or not");
 DEFINE_string(sigint_effect, "stop",
-             "Optional; action to take when a SIGINT signal is received: "
+              "Optional; action to take when a SIGINT signal is received: "
               "snapshot, stop or none.");
 DEFINE_string(sighup_effect, "snapshot",
-             "Optional; action to take when a SIGHUP signal is received: "
-             "snapshot, stop or none.");
+              "Optional; action to take when a SIGHUP signal is received: "
+              "snapshot, stop or none.");
+DEFINE_int32(cpu_info, 0, "1: add cpu seg info into offlinemodel file, 0: no");
+DEFINE_string(datastrategy, "-1,-1",
+              "Use it to control input and output data_strategy"
+              " 0: cpu_mlu_balance; 1: cpu_priority; "
+              " 2: mlu_priority;    3: no_preprocess ");
+DEFINE_string(dataorder, "0,0",
+              "Use it to control input and output dataorder"
+              " 0: NCHW; 1: NHWC; ");
 
 // A simple registry for caffe commands.
 typedef int (*BrewFunction)();
 typedef std::map<caffe::string, BrewFunction> BrewMap;
 BrewMap g_brew_map;
 
-#define RegisterBrewFunction(func) \
-namespace { \
-class __Registerer_##func { \
- public: /* NOLINT */ \
-  __Registerer_##func() { \
-    g_brew_map[#func] = &func; \
-  } \
-}; \
-__Registerer_##func g_registerer_##func; \
-}
+#define RegisterBrewFunction(func)                       \
+  namespace {                                            \
+  class __Registerer_##func {                            \
+   public: /* NOLINT */                                  \
+    __Registerer_##func() { g_brew_map[#func] = &func; } \
+  };                                                     \
+  __Registerer_##func g_registerer_##func;               \
+  }
 
 static BrewFunction GetBrewFunction(const caffe::string& name) {
   if (g_brew_map.count(name)) {
     return g_brew_map[name];
   } else {
     LOG(ERROR) << "Available caffe actions:";
-    for (BrewMap::iterator it = g_brew_map.begin();
-         it != g_brew_map.end(); ++it) {
+    for (BrewMap::iterator it = g_brew_map.begin(); it != g_brew_map.end();
+         ++it) {
       LOG(ERROR) << "\t" << it->first;
     }
     LOG(FATAL) << "Unknown action: " << name;
@@ -89,11 +145,11 @@ static BrewFunction GetBrewFunction(const caffe::string& name) {
 static void get_gpus(vector<int>* gpus) {
   if (FLAGS_gpu == "all") {
     int count = 0;
-#ifndef CPU_ONLY
+  #ifdef USE_CUDA
     CUDA_CHECK(cudaGetDeviceCount(&count));
-#else
+  #else
     NO_GPU;
-#endif
+  #endif
     for (int i = 0; i < count; ++i) {
       gpus->push_back(i);
     }
@@ -110,12 +166,9 @@ static void get_gpus(vector<int>* gpus) {
 
 // Parse phase from flags
 caffe::Phase get_phase_from_flags(caffe::Phase default_value) {
-  if (FLAGS_phase == "")
-    return default_value;
-  if (FLAGS_phase == "TRAIN")
-    return caffe::TRAIN;
-  if (FLAGS_phase == "TEST")
-    return caffe::TEST;
+  if (FLAGS_phase == "") return default_value;
+  if (FLAGS_phase == "TRAIN") return caffe::TRAIN;
+  if (FLAGS_phase == "TEST") return caffe::TEST;
   LOG(FATAL) << "phase must be \"TRAIN\" or \"TEST\"";
   return caffe::TRAIN;  // Avoid warning
 }
@@ -150,7 +203,7 @@ RegisterBrewFunction(device_query);
 // test nets.
 void CopyLayers(caffe::Solver<float>* solver, const std::string& model_list) {
   std::vector<std::string> model_names;
-  boost::split(model_names, model_list, boost::is_any_of(",") );
+  boost::split(model_names, model_list, boost::is_any_of(","));
   for (int i = 0; i < model_names.size(); ++i) {
     LOG(INFO) << "Finetuning from " << model_names[i];
     solver->net()->CopyTrainedLayersFrom(model_names[i]);
@@ -162,8 +215,7 @@ void CopyLayers(caffe::Solver<float>* solver, const std::string& model_list) {
 
 // Translate the signal effect the user specified on the command-line to the
 // corresponding enumeration.
-caffe::SolverAction::Enum GetRequestedAction(
-    const std::string& flag_value) {
+caffe::SolverAction::Enum GetRequestedAction(const std::string& flag_value) {
   if (flag_value == "stop") {
     return caffe::SolverAction::STOP;
   }
@@ -173,7 +225,7 @@ caffe::SolverAction::Enum GetRequestedAction(
   if (flag_value == "none") {
     return caffe::SolverAction::NONE;
   }
-  LOG(FATAL) << "Invalid signal effect \""<< flag_value << "\" was specified";
+  LOG(FATAL) << "Invalid signal effect \"" << flag_value << "\" was specified";
 }
 
 // Train / Finetune a model.
@@ -181,7 +233,7 @@ int train() {
   CHECK_GT(FLAGS_solver.size(), 0) << "Need a solver definition to train.";
   CHECK(!FLAGS_snapshot.size() || !FLAGS_weights.size())
       << "Give a snapshot to resume training or weights to finetune "
-      "but not both.";
+         "but not both.";
   vector<string> stages = get_stages_from_flags();
 
   caffe::SolverParameter solver_param;
@@ -194,15 +246,13 @@ int train() {
 
   // If the gpus flag is not provided, allow the mode and device to be set
   // in the solver prototxt.
-  if (FLAGS_gpu.size() == 0
-      && solver_param.has_solver_mode()
-      && solver_param.solver_mode() == caffe::SolverParameter_SolverMode_GPU) {
-      if (solver_param.has_device_id()) {
-          FLAGS_gpu = "" +
-              boost::lexical_cast<string>(solver_param.device_id());
-      } else {  // Set default GPU if unspecified
-          FLAGS_gpu = "" + boost::lexical_cast<string>(0);
-      }
+  if (FLAGS_gpu.size() == 0 && solver_param.has_solver_mode() &&
+      solver_param.solver_mode() == caffe::SolverParameter_SolverMode_GPU) {
+    if (solver_param.has_device_id()) {
+      FLAGS_gpu = "" + boost::lexical_cast<string>(solver_param.device_id());
+    } else {  // Set default GPU if unspecified
+      FLAGS_gpu = "" + boost::lexical_cast<string>(0);
+    }
   }
 
   vector<int> gpus;
@@ -216,25 +266,24 @@ int train() {
       s << (i ? ", " : "") << gpus[i];
     }
     LOG(INFO) << "Using GPUs " << s.str();
-#ifndef CPU_ONLY
+  #ifdef USE_CUDA
     cudaDeviceProp device_prop;
     for (int i = 0; i < gpus.size(); ++i) {
       cudaGetDeviceProperties(&device_prop, gpus[i]);
       LOG(INFO) << "GPU " << gpus[i] << ": " << device_prop.name;
     }
-#endif
+  #endif  // USE_CUDA
     solver_param.set_device_id(gpus[0]);
     Caffe::SetDevice(gpus[0]);
     Caffe::set_mode(Caffe::GPU);
     Caffe::set_solver_count(gpus.size());
   }
 
-  caffe::SignalHandler signal_handler(
-        GetRequestedAction(FLAGS_sigint_effect),
-        GetRequestedAction(FLAGS_sighup_effect));
+  caffe::SignalHandler signal_handler(GetRequestedAction(FLAGS_sigint_effect),
+                                      GetRequestedAction(FLAGS_sighup_effect));
 
-  shared_ptr<caffe::Solver<float> >
-      solver(caffe::SolverRegistry<float>::CreateSolver(solver_param));
+  shared_ptr<caffe::Solver<float> > solver(
+      caffe::SolverRegistry<float>::CreateSolver(solver_param));
 
   solver->SetActionFunction(signal_handler.GetActionFunction());
 
@@ -247,12 +296,12 @@ int train() {
 
   LOG(INFO) << "Starting Optimization";
   if (gpus.size() > 1) {
-#ifdef USE_NCCL
+  #ifdef USE_NCCL
     caffe::NCCL<float> nccl(solver);
     nccl.Run(gpus, FLAGS_snapshot.size() > 0 ? FLAGS_snapshot.c_str() : NULL);
-#else
+  #else
     LOG(FATAL) << "Multi-GPU execution not available - rebuild with USE_NCCL";
-#endif
+  #endif  // USE_NCCL
   } else {
     solver->Solve();
   }
@@ -261,11 +310,48 @@ int train() {
 }
 RegisterBrewFunction(train);
 
+#ifdef USE_MLU
+static bool libInit = false;
+static inline void parse_mlu_device_args() {
+  cnmlInit(0);
+  libInit = true;
+  Caffe::set_mlu_device(FLAGS_mludevice);
+  if (FLAGS_data_parallel * FLAGS_model_parallel > 32) {
+    LOG(WARNING) << "data_parallel * model_parallel is greater than 32 ";
+    LOG(WARNING) << "both data_parallel and model_parallel are set to 1 ";
+    FLAGS_data_parallel = FLAGS_model_parallel = 1;
+  }
+  Caffe::setDataParallel(FLAGS_data_parallel);
+  Caffe::setModelParallel(FLAGS_model_parallel);
+  Caffe::set_rt_core(FLAGS_mcore);
+}
+
+void parse_mlu_args_for_test() {
+  if (FLAGS_mmode == "CPU" || FLAGS_mmode.size() == 0) {
+    LOG(INFO) << "Use CPU.";
+    Caffe::set_mode(Caffe::CPU);
+    return;
+  }
+
+  parse_mlu_device_args();
+  Caffe::setReshapeMode(FLAGS_mreshape);
+  Caffe::set_mode(FLAGS_mmode);
+
+  stringstream ss(FLAGS_datastrategy);
+  vector<int> strategy;
+  string value;
+  while (getline(ss, value, ',')) {
+    strategy.push_back(std::atoi(value.c_str()));
+  }
+  if (strategy[0] != -1 || strategy[1] != -1) {
+    Caffe::setDataStrategy(strategy);
+  }
+}
+#endif  // USE_MLU
 
 // Test: score a model.
 int test() {
   CHECK_GT(FLAGS_model.size(), 0) << "Need a model definition to score.";
-  CHECK_GT(FLAGS_weights.size(), 0) << "Need model weights to score.";
   vector<string> stages = get_stages_from_flags();
 
   // Set device id and mode
@@ -273,20 +359,24 @@ int test() {
   get_gpus(&gpus);
   if (gpus.size() != 0) {
     LOG(INFO) << "Use GPU with device ID " << gpus[0];
-#ifndef CPU_ONLY
+  #ifdef USE_CUDA
     cudaDeviceProp device_prop;
     cudaGetDeviceProperties(&device_prop, gpus[0]);
     LOG(INFO) << "GPU device name: " << device_prop.name;
-#endif
+  #endif  // USE_CUDA
     Caffe::SetDevice(gpus[0]);
     Caffe::set_mode(Caffe::GPU);
   } else {
+  #ifdef USE_MLU
+    parse_mlu_args_for_test();
+  #else
     LOG(INFO) << "Use CPU.";
     Caffe::set_mode(Caffe::CPU);
+  #endif  // USE_MLU
   }
   // Instantiate the caffe net.
   Net<float> caffe_net(FLAGS_model, caffe::TEST, FLAGS_level, &stages);
-  caffe_net.CopyTrainedLayersFrom(FLAGS_weights);
+  if (FLAGS_weights.size()) caffe_net.CopyTrainedLayersFrom(FLAGS_weights);
   LOG(INFO) << "Running for " << FLAGS_iterations << " iterations.";
 
   vector<int> test_score_output_id;
@@ -294,53 +384,136 @@ int test() {
   float loss = 0;
   for (int i = 0; i < FLAGS_iterations; ++i) {
     float iter_loss;
-    const vector<Blob<float>*>& result =
-        caffe_net.Forward(&iter_loss);
+    const vector<Blob<float>*>& result = caffe_net.Forward(&iter_loss);
     loss += iter_loss;
     int idx = 0;
     for (int j = 0; j < result.size(); ++j) {
+      const std::string& output_name =
+          caffe_net.blob_names()[caffe_net.output_blob_indices()[j]];
+
+      string filename;
+      if (Caffe::mode() == Caffe::CPU)
+        filename = "test_cpu_iter";
+      else
+        filename = "test_mlu_iter";
+      filename +=
+          caffe::format_int(i) + "_" + output_name + caffe::format_int(j);
+      ofstream output(filename);
+
       const float* result_vec = result[j]->cpu_data();
       for (int k = 0; k < result[j]->count(); ++k, ++idx) {
         const float score = result_vec[k];
+        output << score << std::endl;
         if (i == 0) {
           test_score.push_back(score);
           test_score_output_id.push_back(j);
         } else {
           test_score[idx] += score;
         }
-        const std::string& output_name = caffe_net.blob_names()[
-            caffe_net.output_blob_indices()[j]];
         LOG(INFO) << "Batch " << i << ", " << output_name << " = " << score;
       }
+      output.close();
     }
   }
   loss /= FLAGS_iterations;
   LOG(INFO) << "Loss: " << loss;
   for (int i = 0; i < test_score.size(); ++i) {
-    const std::string& output_name = caffe_net.blob_names()[
-        caffe_net.output_blob_indices()[test_score_output_id[i]]];
-    const float loss_weight = caffe_net.blob_loss_weights()[
-        caffe_net.output_blob_indices()[test_score_output_id[i]]];
+    const std::string& output_name = caffe_net.blob_names()
+        [caffe_net.output_blob_indices()[test_score_output_id[i]]];
+    const float loss_weight = caffe_net.blob_loss_weights()
+        [caffe_net.output_blob_indices()[test_score_output_id[i]]];
     std::ostringstream loss_msg_stream;
     const float mean_score = test_score[i] / FLAGS_iterations;
     if (loss_weight) {
-      loss_msg_stream << " (* " << loss_weight
-                      << " = " << loss_weight * mean_score << " loss)";
+      loss_msg_stream << " (* " << loss_weight << " = "
+                      << loss_weight * mean_score << " loss)";
     }
     LOG(INFO) << output_name << " = " << mean_score << loss_msg_stream.str();
   }
-
   return 0;
 }
 RegisterBrewFunction(test);
 
+#ifdef USE_MLU
+// genoff: generate Cambricon offline model.
+int genoff() {
+  CHECK_GT(FLAGS_mcore.size(), 0) << "Need specified core version";
+  CHECK_GT(FLAGS_model.size(), 0) << "Need a model definition";
+  CHECK_GT(FLAGS_weights.size(), 0) << "Need model weights";
+  // Use fake device
+  Caffe::DeviceFlag = Caffe::FakeDevice;
+  Caffe::set_rt_core(FLAGS_mcore);
+  Caffe::set_mode(Caffe::MFUS);
+  Caffe::setReshapeMode(Caffe::ReshapeMode::SETUPONLY);
+  CHECK_NE(FLAGS_weights.size(), 0) << "weights must be provided!";
+
+  Net<float> net(FLAGS_model, caffe::TEST);
+  net.CopyTrainedLayersFrom(FLAGS_weights);
+
+  // Fill in the value of im_info in prototxt.
+  // The value of im_info is only needed in prototxt having proposal layer.
+  if (net.has_blob("im_info")) {
+    CHECK_EQ(net.blob_by_name("im_info")->count(), 3)
+      << "The count of blob named im_info should be 3 in prototxt."
+      << " ( im_h, im_w, scale )";
+    float* im_info_data = net.blob_by_name("im_info")->mutable_cpu_data();
+    im_info_data[0] = net.input_blobs()[0]->height();
+    im_info_data[1] = net.input_blobs()[0]->width();
+    im_info_data[2] = 1;
+  }
+
+  int model_parallel = 1;
+  if (FLAGS_model_parallel >= 1 && FLAGS_model_parallel <= 32) {
+    model_parallel = FLAGS_model_parallel;
+  } else {
+    LOG(FATAL) << "model_parallel ranges from 1 to 32.";
+  }
+  hardwareReshape_t hd_reshape = hardware_reshape_close;
+  if (FLAGS_hd_reshape == 2) {
+    hd_reshape = hardware_reshape_NCHW;
+  } else if (FLAGS_hd_reshape == 3) {
+    hd_reshape = hardware_reshape_NHWC;
+  }
+  stringstream ss(FLAGS_datastrategy);
+  vector<int> strategy;
+  string value;
+  while (getline(ss, value, ',')) {
+    strategy.push_back(std::atoi(value.c_str()));
+  }
+  stringstream ss1(FLAGS_dataorder);
+  vector<int> dataorder;
+  while (getline(ss1, value, ',')) {
+    dataorder.push_back(std::atoi(value.c_str()));
+  }
+  for (auto order : dataorder) {
+    if (order < 0 || order > 1) {
+      LOG(FATAL) << "dataorder only supports 0 and 1. 0 : NCHW, 1 : NHWC.";
+    }
+  }
+  Caffe::setCpuDataOrder(dataorder);
+  if (FLAGS_cpu_info == 1) {
+    net.set_cpu_info_flag(true);
+  }
+  if (strategy[0] != -1 || strategy[1] != -1) {
+    Caffe::setDataStrategy(strategy);
+  }
+  struct timeval tpend, tpstart;
+  gettimeofday(&tpstart, NULL);
+  net.genOfflineModel(FLAGS_mname, hd_reshape, model_parallel);
+  gettimeofday(&tpend, NULL);
+  float execTime = 1000000 * (tpend.tv_sec - tpstart.tv_sec) +
+    tpend.tv_usec - tpstart.tv_usec;
+  LOG(INFO) << "execution time: " << execTime << " us";
+  return 0;
+}
+RegisterBrewFunction(genoff);
+#endif  // USE_MLU
 
 // Time: benchmark the execution time of a model.
 int time() {
   CHECK_GT(FLAGS_model.size(), 0) << "Need a model definition to time.";
-  caffe::Phase phase = get_phase_from_flags(caffe::TRAIN);
+  caffe::Phase phase = get_phase_from_flags(caffe::TEST);
   vector<string> stages = get_stages_from_flags();
-
   // Set device id and mode
   vector<int> gpus;
   get_gpus(&gpus);
@@ -352,6 +525,9 @@ int time() {
     LOG(INFO) << "Use CPU.";
     Caffe::set_mode(Caffe::CPU);
   }
+  #ifdef USE_MLU
+    parse_mlu_args_for_test();
+  #endif
   // Instantiate the caffe net.
   Net<float> caffe_net(FLAGS_model, phase, FLAGS_level, &stages);
 
@@ -364,13 +540,11 @@ int time() {
   caffe_net.Forward(&initial_loss);
   LOG(INFO) << "Initial loss: " << initial_loss;
   LOG(INFO) << "Performing Backward";
-  caffe_net.Backward();
 
   const vector<shared_ptr<Layer<float> > >& layers = caffe_net.layers();
   const vector<vector<Blob<float>*> >& bottom_vecs = caffe_net.bottom_vecs();
   const vector<vector<Blob<float>*> >& top_vecs = caffe_net.top_vecs();
-  const vector<vector<bool> >& bottom_need_backward =
-      caffe_net.bottom_need_backward();
+  const vector<vector<bool> >& bottom_need_backward = caffe_net.bottom_need_backward();
   LOG(INFO) << "*** Benchmark begins ***";
   LOG(INFO) << "Testing for " << FLAGS_iterations << " iterations.";
   Timer total_timer;
@@ -386,40 +560,44 @@ int time() {
     Timer iter_timer;
     iter_timer.Start();
     forward_timer.Start();
-    for (int i = 0; i < layers.size(); ++i) {
-      timer.Start();
-      layers[i]->Forward(bottom_vecs[i], top_vecs[i]);
-      forward_time_per_layer[i] += timer.MicroSeconds();
+    if (FLAGS_mmode == "MFUS") {
+      caffe_net.Forward(&initial_loss);
+    } else {
+      for (int i = 0; i < layers.size(); ++i) {
+        timer.Start();
+        layers[i]->Forward(bottom_vecs[i], top_vecs[i]);
+        forward_time_per_layer[i] += timer.MicroSeconds();
+      }
     }
     forward_time += forward_timer.MicroSeconds();
-    backward_timer.Start();
-    for (int i = layers.size() - 1; i >= 0; --i) {
-      timer.Start();
-      layers[i]->Backward(top_vecs[i], bottom_need_backward[i],
-                          bottom_vecs[i]);
-      backward_time_per_layer[i] += timer.MicroSeconds();
+    if (Caffe::mode() == Caffe::CPU || Caffe::mode() == Caffe::GPU) {
+      backward_timer.Start();
+      for (int i = layers.size() - 1; i >= 0; --i) {
+        timer.Start();
+        layers[i]->Backward(top_vecs[i], bottom_need_backward[i], bottom_vecs[i]);
+        backward_time_per_layer[i] += timer.MicroSeconds();
+      }
+      backward_time += backward_timer.MicroSeconds();
     }
-    backward_time += backward_timer.MicroSeconds();
-    LOG(INFO) << "Iteration: " << j + 1 << " forward-backward time: "
-      << iter_timer.MilliSeconds() << " ms.";
+    LOG(INFO) << "Iteration: " << j + 1
+              << " forward-backward time: " << iter_timer.MilliSeconds()
+              << " ms.";
   }
   LOG(INFO) << "Average time per layer: ";
   for (int i = 0; i < layers.size(); ++i) {
     const caffe::string& layername = layers[i]->layer_param().name();
-    LOG(INFO) << std::setfill(' ') << std::setw(10) << layername <<
-      "\tforward: " << forward_time_per_layer[i] / 1000 /
-      FLAGS_iterations << " ms.";
-    LOG(INFO) << std::setfill(' ') << std::setw(10) << layername  <<
-      "\tbackward: " << backward_time_per_layer[i] / 1000 /
-      FLAGS_iterations << " ms.";
+    LOG(INFO) << std::setfill(' ') << std::setw(10) << layername << "\tforward: "
+              << forward_time_per_layer[i] / 1000 / FLAGS_iterations << " ms.";
+    LOG(INFO) << std::setfill(' ') << std::setw(10) << layername << "\tbackward: "
+              << backward_time_per_layer[i] / 1000 / FLAGS_iterations << " ms.";
   }
   total_timer.Stop();
-  LOG(INFO) << "Average Forward pass: " << forward_time / 1000 /
-    FLAGS_iterations << " ms.";
-  LOG(INFO) << "Average Backward pass: " << backward_time / 1000 /
-    FLAGS_iterations << " ms.";
-  LOG(INFO) << "Average Forward-Backward: " << total_timer.MilliSeconds() /
-    FLAGS_iterations << " ms.";
+  LOG(INFO) << "Average Forward pass: "
+            << forward_time / 1000 / FLAGS_iterations << " ms.";
+  LOG(INFO) << "Average Backward pass: "
+            << backward_time / 1000 / FLAGS_iterations << " ms.";
+  LOG(INFO) << "Average Forward-Backward: "
+            << total_timer.MilliSeconds() / FLAGS_iterations << " ms.";
   LOG(INFO) << "Total Time: " << total_timer.MilliSeconds() << " ms.";
   LOG(INFO) << "*** Benchmark ends ***";
   return 0;
@@ -432,27 +610,35 @@ int main(int argc, char** argv) {
   // Set version
   gflags::SetVersionString(AS_STRING(CAFFE_VERSION));
   // Usage message.
-  gflags::SetUsageMessage("command line brew\n"
+  gflags::SetUsageMessage(
+      "command line brew\n"
       "usage: caffe <command> <args>\n\n"
       "commands:\n"
       "  train           train or finetune a model\n"
       "  test            score a model\n"
       "  device_query    show GPU diagnostic information\n"
+      "  genoff          generate offline model\n"
       "  time            benchmark model execution time");
   // Run tool or show usage.
   caffe::GlobalInit(&argc, &argv);
   if (argc == 2) {
-#ifdef WITH_PYTHON_LAYER
+  #ifdef WITH_PYTHON_LAYER
     try {
-#endif
-      return GetBrewFunction(caffe::string(argv[1]))();
-#ifdef WITH_PYTHON_LAYER
+  #endif
+      GetBrewFunction(caffe::string(argv[1]))();
+  #ifdef WITH_PYTHON_LAYER
     } catch (bp::error_already_set) {
       PyErr_Print();
       return 1;
     }
-#endif
+  #endif
   } else {
     gflags::ShowUsageWithFlagsRestrict(argv[0], "tools/caffe");
   }
+  #ifdef USE_MLU
+    if (libInit) {
+      Caffe::freeQueue();
+      cnmlExit();
+    }
+  #endif
 }

@@ -1,5 +1,5 @@
-#ifndef CAFFE_EXP_LAYER_HPP_
-#define CAFFE_EXP_LAYER_HPP_
+#ifndef INCLUDE_CAFFE_LAYERS_EXP_LAYER_HPP_
+#define INCLUDE_CAFFE_LAYERS_EXP_LAYER_HPP_
 
 #include <vector>
 
@@ -18,7 +18,7 @@ namespace caffe {
  */
 template <typename Dtype>
 class ExpLayer : public NeuronLayer<Dtype> {
- public:
+  public:
   /**
    * @param param provides ExpParameter exp_param,
    *     with ExpLayer options:
@@ -34,7 +34,7 @@ class ExpLayer : public NeuronLayer<Dtype> {
 
   virtual inline const char* type() const { return "Exp"; }
 
- protected:
+  protected:
   /**
    * @param bottom input Blob vector (length 1)
    *   -# @f$ (N \times C \times H \times W) @f$
@@ -77,4 +77,4 @@ class ExpLayer : public NeuronLayer<Dtype> {
 
 }  // namespace caffe
 
-#endif  // CAFFE_EXP_LAYER_HPP_
+#endif  // INCLUDE_CAFFE_LAYERS_EXP_LAYER_HPP_

@@ -1,9 +1,38 @@
+/*
+All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All rights reserved.
+All other contributions:
+Copyright (c) 2014--2018, the respective contributors
+All rights reserved.
+For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+    * Redistributions of source code must retain the above copyright notice,
+      this list of conditions and the following disclaimer.
+    * Redistributions in binary form must reproduce the above copyright
+      notice, this list of conditions and the following disclaimer in the
+      documentation and/or other materials provided with the distribution.
+    * Neither the name of Intel Corporation nor the names of its contributors
+      may be used to endorse or promote products derived from this software
+      without specific prior written permission.
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+*/
+
 // Fillers are random number generators that fills a blob using the specified
 // algorithm. The expectation is that they are only going to be used during
 // initialization time and will not involve any GPUs.
 
-#ifndef CAFFE_FILLER_HPP
-#define CAFFE_FILLER_HPP
+#ifndef INCLUDE_CAFFE_FILLER_HPP_
+#define INCLUDE_CAFFE_FILLER_HPP_
 
 #include <string>
 
@@ -17,11 +46,11 @@ namespace caffe {
 /// @brief Fills a Blob with constant or randomly-generated data.
 template <typename Dtype>
 class Filler {
- public:
+  public:
   explicit Filler(const FillerParameter& param) : filler_param_(param) {}
   virtual ~Filler() {}
   virtual void Fill(Blob<Dtype>* blob) = 0;
- protected:
+  protected:
   FillerParameter filler_param_;
 };  // class Filler
 
@@ -29,7 +58,7 @@ class Filler {
 /// @brief Fills a Blob with constant values @f$ x = 0 @f$.
 template <typename Dtype>
 class ConstantFiller : public Filler<Dtype> {
- public:
+  public:
   explicit ConstantFiller(const FillerParameter& param)
       : Filler<Dtype>(param) {}
   virtual void Fill(Blob<Dtype>* blob) {
@@ -48,7 +77,7 @@ class ConstantFiller : public Filler<Dtype> {
 /// @brief Fills a Blob with uniformly distributed values @f$ x\sim U(a, b) @f$.
 template <typename Dtype>
 class UniformFiller : public Filler<Dtype> {
- public:
+  public:
   explicit UniformFiller(const FillerParameter& param)
       : Filler<Dtype>(param) {}
   virtual void Fill(Blob<Dtype>* blob) {
@@ -63,7 +92,7 @@ class UniformFiller : public Filler<Dtype> {
 /// @brief Fills a Blob with Gaussian-distributed values @f$ x = a @f$.
 template <typename Dtype>
 class GaussianFiller : public Filler<Dtype> {
- public:
+  public:
   explicit GaussianFiller(const FillerParameter& param)
       : Filler<Dtype>(param) {}
   virtual void Fill(Blob<Dtype>* blob) {
@@ -90,7 +119,7 @@ class GaussianFiller : public Filler<Dtype> {
     }
   }
 
- protected:
+  protected:
   shared_ptr<SyncedMemory> rand_vec_;
 };
 
@@ -99,7 +128,7 @@ class GaussianFiller : public Filler<Dtype> {
  */
 template <typename Dtype>
 class PositiveUnitballFiller : public Filler<Dtype> {
- public:
+  public:
   explicit PositiveUnitballFiller(const FillerParameter& param)
       : Filler<Dtype>(param) {}
   virtual void Fill(Blob<Dtype>* blob) {
@@ -142,7 +171,7 @@ class PositiveUnitballFiller : public Filler<Dtype> {
  */
 template <typename Dtype>
 class XavierFiller : public Filler<Dtype> {
- public:
+  public:
   explicit XavierFiller(const FillerParameter& param)
       : Filler<Dtype>(param) {}
   virtual void Fill(Blob<Dtype>* blob) {
@@ -184,7 +213,7 @@ class XavierFiller : public Filler<Dtype> {
  */
 template <typename Dtype>
 class MSRAFiller : public Filler<Dtype> {
- public:
+  public:
   explicit MSRAFiller(const FillerParameter& param)
       : Filler<Dtype>(param) {}
   virtual void Fill(Blob<Dtype>* blob) {
@@ -242,7 +271,7 @@ out = skimage.transform.rescale(img, factor, mode='constant', cval=0)
  */
 template <typename Dtype>
 class BilinearFiller : public Filler<Dtype> {
- public:
+  public:
   explicit BilinearFiller(const FillerParameter& param)
       : Filler<Dtype>(param) {}
   virtual void Fill(Blob<Dtype>* blob) {
@@ -285,11 +314,12 @@ Filler<Dtype>* GetFiller(const FillerParameter& param) {
   } else if (type == "bilinear") {
     return new BilinearFiller<Dtype>(param);
   } else {
-    CHECK(false) << "Unknown filler name: " << param.type();
+    LOG(WARNING) << "Unkown filler type, replaced by ConstantFiller";
+    return new ConstantFiller<Dtype>(param);
   }
   return (Filler<Dtype>*)(NULL);
 }
 
 }  // namespace caffe
 
-#endif  // CAFFE_FILLER_HPP_
+#endif  // INCLUDE_CAFFE_FILLER_HPP_

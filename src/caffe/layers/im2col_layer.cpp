@@ -1,3 +1,32 @@
+/*
+All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All rights reserved.
+All other contributions:
+Copyright (c) 2014--2018, the respective contributors
+All rights reserved.
+For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+    * Redistributions of source code must retain the above copyright notice,
+      this list of conditions and the following disclaimer.
+    * Redistributions in binary form must reproduce the above copyright
+      notice, this list of conditions and the following disclaimer in the
+      documentation and/or other materials provided with the distribution.
+    * Neither the name of Intel Corporation nor the names of its contributors
+      may be used to endorse or promote products derived from this software
+      without specific prior written permission.
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+*/
+
 #include <vector>
 
 #include "caffe/layers/im2col_layer.hpp"
@@ -65,7 +94,8 @@ void Im2colLayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& bottom,
     }
   }
   // Setup pad dimensions (pad_).
-  pad_.Reshape(dim_blob_shape);
+  vector<int> pad_shape(1, std::max(num_spatial_axes_ * 2, 1));
+  pad_.Reshape(pad_shape);
   int* pad_data = pad_.mutable_cpu_data();
   if (conv_param.has_pad_h() || conv_param.has_pad_w()) {
     CHECK_EQ(num_spatial_axes_, 2)
@@ -74,6 +104,8 @@ void Im2colLayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& bottom,
         << "Either pad or pad_h/w should be specified; not both.";
     pad_data[0] = conv_param.pad_h();
     pad_data[1] = conv_param.pad_w();
+    pad_data[2] = conv_param.pad_h();
+    pad_data[3] = conv_param.pad_w();
   } else {
     const int num_pad_dims = conv_param.pad_size();
     CHECK(num_pad_dims == 0 || num_pad_dims == 1 ||
@@ -82,11 +114,12 @@ void Im2colLayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& bottom,
         << "(pad specified " << num_pad_dims << " times; "
         << num_spatial_axes_ << " spatial dims);";
     const int kDefaultPad = 0;
-    for (int i = 0; i < num_spatial_axes_; ++i) {
+    for (int i = 0; i < num_spatial_axes_ * 2; ++i) {
       pad_data[i] = (num_pad_dims == 0) ? kDefaultPad :
-          conv_param.pad((num_pad_dims == 1) ? 0 : i);
+          conv_param.pad((num_pad_dims == 1) ? 0 : i % num_pad_dims);
     }
   }
+
   // Setup dilation dimensions (dilation_).
   dilation_.Reshape(dim_blob_shape);
   int* dilation_data = dilation_.mutable_cpu_data();
@@ -114,8 +147,9 @@ void Im2colLayer<Dtype>::Reshape(const vector<Blob<Dtype>*>& bottom,
   for (int i = 0; i < num_spatial_axes_; ++i) {
     top_shape[channel_axis_] *= kernel_shape_data[i];
     const int input_dim = bottom[0]->shape(channel_axis_ + i + 1);
+    const int pad_nr = pad_data[i] + pad_data[num_spatial_axes_ + i];
     const int kernel_extent = dilation_data[i] * (kernel_shape_data[i] - 1) + 1;
-    const int output_dim = (input_dim + 2 * pad_data[i] - kernel_extent)
+    const int output_dim = (input_dim + pad_nr - kernel_extent)
         / stride_data[i] + 1;
     top_shape[channel_axis_ + i + 1] = output_dim;
   }
@@ -144,8 +178,8 @@ void Im2colLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom,
           bottom[0]->shape(channel_axis_ + 1),
           bottom[0]->shape(channel_axis_ + 2),
           kernel_shape_.cpu_data()[0], kernel_shape_.cpu_data()[1],
-          pad_.cpu_data()[0], pad_.cpu_data()[1],
-          stride_.cpu_data()[0], stride_.cpu_data()[1],
+          pad_.cpu_data()[0], pad_.cpu_data()[1], pad_.cpu_data()[2],
+          pad_.cpu_data()[3], stride_.cpu_data()[0], stride_.cpu_data()[1],
           dilation_.cpu_data()[0], dilation_.cpu_data()[1],
           top_data + n * top_dim_);
     } else {
@@ -169,8 +203,8 @@ void Im2colLayer<Dtype>::Backward_cpu(const vector<Blob<Dtype>*>& top,
           bottom[0]->shape(channel_axis_ + 1),
           bottom[0]->shape(channel_axis_ + 2),
           kernel_shape_.cpu_data()[0], kernel_shape_.cpu_data()[1],
-          pad_.cpu_data()[0], pad_.cpu_data()[1],
-          stride_.cpu_data()[0], stride_.cpu_data()[1],
+          pad_.cpu_data()[0], pad_.cpu_data()[1], pad_.cpu_data()[2],
+          pad_.cpu_data()[3], stride_.cpu_data()[0], stride_.cpu_data()[1],
           dilation_.cpu_data()[0], dilation_.cpu_data()[1],
           bottom_diff + n * bottom_dim_);
     } else {
@@ -183,7 +217,7 @@ void Im2colLayer<Dtype>::Backward_cpu(const vector<Blob<Dtype>*>& top,
   }
 }
 
-#ifdef CPU_ONLY
+#ifndef USE_CUDA
 STUB_GPU(Im2colLayer);
 #endif
 

@@ -1,3 +1,32 @@
+/*
+All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All rights reserved.
+All other contributions:
+Copyright (c) 2014--2018, the respective contributors
+All rights reserved.
+For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+    * Redistributions of source code must retain the above copyright notice,
+      this list of conditions and the following disclaimer.
+    * Redistributions in binary form must reproduce the above copyright
+      notice, this list of conditions and the following disclaimer in the
+      documentation and/or other materials provided with the distribution.
+    * Neither the name of Intel Corporation nor the names of its contributors
+      may be used to endorse or promote products derived from this software
+      without specific prior written permission.
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+*/
+
 #if defined(USE_LEVELDB) && defined(USE_LMDB) && defined(USE_OPENCV)
 #include <string>
 
@@ -17,15 +46,15 @@ using boost::scoped_ptr;
 
 template <typename TypeParam>
 class DBTest : public ::testing::Test {
- protected:
+  protected:
   DBTest()
       : backend_(TypeParam::backend),
-      root_images_(string(EXAMPLES_SOURCE_DIR) + string("images/")) {}
+        root_images_(string(TEST_SOURCE_DIR())) {}
 
   virtual void SetUp() {
     MakeTempDir(&source_);
     source_ += "/db";
-    string keys[] = {"cat.jpg", "fish-bike.jpg"};
+    string keys[] = {"dog.jpg", "train.jpg"};
     LOG(INFO) << "Using temporary db " << source_;
     scoped_ptr<db::DB> db(db::GetDB(TypeParam::backend));
     db->Open(this->source_, db::NEW);
@@ -40,7 +69,7 @@ class DBTest : public ::testing::Test {
     txn->Commit();
   }
 
-  virtual ~DBTest() { }
+  virtual ~DBTest() {}
 
   DataParameter_DB backend_;
   string source_;
@@ -87,10 +116,10 @@ TYPED_TEST(DBTest, TestSeekToFirst) {
   string key = cursor->key();
   Datum datum;
   datum.ParseFromString(cursor->value());
-  EXPECT_EQ(key, "cat.jpg");
+  EXPECT_EQ(key, "dog.jpg");
   EXPECT_EQ(datum.channels(), 3);
-  EXPECT_EQ(datum.height(), 360);
-  EXPECT_EQ(datum.width(), 480);
+  EXPECT_EQ(datum.height(), 576);
+  EXPECT_EQ(datum.width(), 768);
 }
 
 TYPED_TEST(DBTest, TestKeyValue) {
@@ -101,18 +130,18 @@ TYPED_TEST(DBTest, TestKeyValue) {
   string key = cursor->key();
   Datum datum;
   datum.ParseFromString(cursor->value());
-  EXPECT_EQ(key, "cat.jpg");
+  EXPECT_EQ(key, "dog.jpg");
   EXPECT_EQ(datum.channels(), 3);
-  EXPECT_EQ(datum.height(), 360);
-  EXPECT_EQ(datum.width(), 480);
+  EXPECT_EQ(datum.height(), 576);
+  EXPECT_EQ(datum.width(), 768);
   cursor->Next();
   EXPECT_TRUE(cursor->valid());
   key = cursor->key();
   datum.ParseFromString(cursor->value());
-  EXPECT_EQ(key, "fish-bike.jpg");
+  EXPECT_EQ(key, "train.jpg");
   EXPECT_EQ(datum.channels(), 3);
-  EXPECT_EQ(datum.height(), 323);
-  EXPECT_EQ(datum.width(), 481);
+  EXPECT_EQ(datum.height(), 720);
+  EXPECT_EQ(datum.width(), 1280);
   cursor->Next();
   EXPECT_FALSE(cursor->valid());
 }
@@ -122,13 +151,13 @@ TYPED_TEST(DBTest, TestWrite) {
   db->Open(this->source_, db::WRITE);
   scoped_ptr<db::Transaction> txn(db->NewTransaction());
   Datum datum;
-  ReadFileToDatum(this->root_images_ + "cat.jpg", 0, &datum);
+  ReadFileToDatum(this->root_images_ + "000002.jpg", 0, &datum);
   string out;
   CHECK(datum.SerializeToString(&out));
-  txn->Put("cat.jpg", out);
-  ReadFileToDatum(this->root_images_ + "fish-bike.jpg", 1, &datum);
+  txn->Put("000002.jpg", out);
+  ReadFileToDatum(this->root_images_ + "000456.jpg", 1, &datum);
   CHECK(datum.SerializeToString(&out));
-  txn->Put("fish-bike.jpg", out);
+  txn->Put("000456.jpg", out);
   txn->Commit();
 }
 

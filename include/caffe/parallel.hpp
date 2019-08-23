@@ -1,5 +1,34 @@
-#ifndef CAFFE_PARALLEL_HPP_
-#define CAFFE_PARALLEL_HPP_
+/*
+All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All rights reserved.
+All other contributions:
+Copyright (c) 2014--2018, the respective contributors
+All rights reserved.
+For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+    * Redistributions of source code must retain the above copyright notice,
+      this list of conditions and the following disclaimer.
+    * Redistributions in binary form must reproduce the above copyright
+      notice, this list of conditions and the following disclaimer in the
+      documentation and/or other materials provided with the distribution.
+    * Neither the name of Intel Corporation nor the names of its contributors
+      may be used to endorse or promote products derived from this software
+      without specific prior written permission.
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+*/
+
+#ifndef INCLUDE_CAFFE_PARALLEL_HPP_
+#define INCLUDE_CAFFE_PARALLEL_HPP_
 
 #ifdef USE_NCCL
 
@@ -23,51 +52,44 @@ namespace caffe {
 // Represents a net parameters. Once a net is created, its parameter buffers can
 // be replaced by ones from Params, to allow parallelization. Params ensures
 // parameters are allocated in one consecutive array.
-template<typename Dtype>
+template <typename Dtype>
 class Params {
- public:
+  public:
   explicit Params(shared_ptr<Solver<Dtype> > root_solver);
-  virtual ~Params() {
-  }
+  virtual ~Params() {}
 
-  inline size_t size() const {
-    return size_;
-  }
-  inline Dtype* data() const {
-    return data_;
-  }
-  inline Dtype* diff() const {
-    return diff_;
-  }
+  inline size_t size() const { return size_; }
+  inline Dtype* data() const { return data_; }
+  inline Dtype* diff() const { return diff_; }
 
- protected:
-  const size_t size_;           // Size of buffers
-  Dtype* data_;                 // Network parameters
-  Dtype* diff_;                 // Gradient
+  protected:
+  const size_t size_;  // Size of buffers
+  Dtype* data_;        // Network parameters
+  Dtype* diff_;        // Gradient
 
-DISABLE_COPY_AND_ASSIGN(Params);
+  DISABLE_COPY_AND_ASSIGN(Params);
 };
 
 // Params stored in GPU memory.
-template<typename Dtype>
+template <typename Dtype>
 class GPUParams : public Params<Dtype> {
- public:
+  public:
   GPUParams(shared_ptr<Solver<Dtype> > root_solver, int device);
   virtual ~GPUParams();
 
   void Configure(Solver<Dtype>* solver) const;
 
- protected:
+  protected:
   using Params<Dtype>::size_;
   using Params<Dtype>::data_;
   using Params<Dtype>::diff_;
 };
 
-template<typename Dtype>
+template <typename Dtype>
 class NCCL : public GPUParams<Dtype>,
              public Solver<Dtype>::Callback,
              public Net<Dtype>::Callback {
- public:
+  public:
   /**
    * Single process version.
    */
@@ -100,7 +122,7 @@ class NCCL : public GPUParams<Dtype>,
    */
   void Run(const vector<int>& gpus, const char* restore);
 
- protected:
+  protected:
   void Init();
   void on_start() {}
   void run(int layer);  // Net callback
@@ -120,4 +142,4 @@ class NCCL : public GPUParams<Dtype>,
 }  // namespace caffe
 
 #endif  // USE_NCCL
-#endif  // header
+#endif  // INCLUDE_CAFFE_PARALLEL_HPP_

@@ -1,3 +1,32 @@
+/*
+All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All rights reserved.
+All other contributions:
+Copyright (c) 2014--2018, the respective contributors
+All rights reserved.
+For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+    * Redistributions of source code must retain the above copyright notice,
+      this list of conditions and the following disclaimer.
+    * Redistributions in binary form must reproduce the above copyright
+      notice, this list of conditions and the following disclaimer in the
+      documentation and/or other materials provided with the distribution.
+    * Neither the name of Intel Corporation nor the names of its contributors
+      may be used to endorse or promote products derived from this software
+      without specific prior written permission.
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+*/
+
 #include <string>
 #include <vector>
 
@@ -128,7 +157,7 @@ void SGDSolver<Dtype>::Normalize(int param_id) {
     break;
   }
   case Caffe::GPU: {
-#ifndef CPU_ONLY
+#ifdef USE_CUDA
     caffe_gpu_scal(net_params[param_id]->count(), accum_normalization,
         net_params[param_id]->mutable_gpu_diff());
 #else
@@ -173,7 +202,7 @@ void SGDSolver<Dtype>::Regularize(int param_id) {
     break;
   }
   case Caffe::GPU: {
-#ifndef CPU_ONLY
+#ifdef USE_CUDA
     if (local_decay) {
       if (regularization_type == "L2") {
         // add weight decay
@@ -203,7 +232,7 @@ void SGDSolver<Dtype>::Regularize(int param_id) {
   }
 }
 
-#ifndef CPU_ONLY
+#ifdef USE_CUDA
 template <typename Dtype>
 void sgd_update_gpu(int N, Dtype* g, Dtype* h, Dtype momentum,
     Dtype local_rate);
@@ -227,7 +256,7 @@ void SGDSolver<Dtype>::ComputeUpdateValue(int param_id, Dtype rate) {
     break;
   }
   case Caffe::GPU: {
-#ifndef CPU_ONLY
+#ifdef USE_CUDA
     sgd_update_gpu(net_params[param_id]->count(),
         net_params[param_id]->mutable_gpu_diff(),
         history_[param_id]->mutable_gpu_data(),
@@ -248,9 +277,11 @@ void SGDSolver<Dtype>::SnapshotSolverState(const string& model_filename) {
     case caffe::SolverParameter_SnapshotFormat_BINARYPROTO:
       SnapshotSolverStateToBinaryProto(model_filename);
       break;
+#ifdef USE_HDF5
     case caffe::SolverParameter_SnapshotFormat_HDF5:
       SnapshotSolverStateToHDF5(model_filename);
       break;
+#endif
     default:
       LOG(FATAL) << "Unsupported snapshot format.";
   }
@@ -278,6 +309,7 @@ void SGDSolver<Dtype>::SnapshotSolverStateToBinaryProto(
 template <typename Dtype>
 void SGDSolver<Dtype>::SnapshotSolverStateToHDF5(
     const string& model_filename) {
+#ifdef USE_HDF5
   string snapshot_filename =
       Solver<Dtype>::SnapshotFilename(".solverstate.h5");
   LOG(INFO) << "Snapshotting solver state to HDF5 file " << snapshot_filename;
@@ -299,6 +331,7 @@ void SGDSolver<Dtype>::SnapshotSolverStateToHDF5(
   }
   H5Gclose(history_hid);
   H5Fclose(file_hid);
+#endif
 }
 
 template <typename Dtype>
@@ -323,6 +356,7 @@ void SGDSolver<Dtype>::RestoreSolverStateFromBinaryProto(
 
 template <typename Dtype>
 void SGDSolver<Dtype>::RestoreSolverStateFromHDF5(const string& state_file) {
+#ifdef USE_HDF5
   hid_t file_hid = H5Fopen(state_file.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
   CHECK_GE(file_hid, 0) << "Couldn't open solver state file " << state_file;
   this->iter_ = hdf5_load_int(file_hid, "iter");
@@ -344,6 +378,7 @@ void SGDSolver<Dtype>::RestoreSolverStateFromHDF5(const string& state_file) {
   }
   H5Gclose(history_hid);
   H5Fclose(file_hid);
+#endif
 }
 
 INSTANTIATE_CLASS(SGDSolver);

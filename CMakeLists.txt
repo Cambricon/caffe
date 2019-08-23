@@ -10,8 +10,8 @@ endif()
 project(Caffe C CXX)
 
 # ---[ Caffe version
-set(CAFFE_TARGET_VERSION "1.0.0" CACHE STRING "Caffe logical version")
-set(CAFFE_TARGET_SOVERSION "1.0.0" CACHE STRING "Caffe soname version")
+set(CAFFE_TARGET_VERSION "5.1.1" CACHE STRING "Caffe logical version")
+set(CAFFE_TARGET_SOVERSION "5.1.1" CACHE STRING "Caffe soname version")
 add_definitions(-DCAFFE_VERSION=${CAFFE_TARGET_VERSION})
 
 # ---[ Using cmake scripts and modules
@@ -27,20 +27,30 @@ include(cmake/Summary.cmake)
 include(cmake/ConfigGen.cmake)
 
 # ---[ Options
-caffe_option(CPU_ONLY  "Build Caffe without CUDA support" OFF) # TODO: rename to USE_CUDA
-caffe_option(USE_CUDNN "Build Caffe with cuDNN library support" ON IF NOT CPU_ONLY)
+caffe_option(USE_MLU  "Build Caffe without CUDA support" ON)
+caffe_option(CROSS_COMPILE  "don't use resize when build arm32" OFF)
+caffe_option(CROSS_COMPILE_ARM64  "don't use resize when build arm64" OFF)
+caffe_option(TEST_COVERAGE  "Test code coverage" OFF)
+caffe_option(USE_CUDA  "Build Caffe without CUDA support" OFF)
+caffe_option(USE_CUDNN "Build Caffe with cuDNN library support" OFF)
 caffe_option(USE_NCCL "Build Caffe with NCCL library support" OFF)
+caffe_option(USE_HDF5 "Build Caffe with hdf5" ON)
 caffe_option(BUILD_SHARED_LIBS "Build shared libraries" ON)
 caffe_option(BUILD_python "Build Python wrapper" ON)
 set(python_version "2" CACHE STRING "Specify which Python version to use")
-caffe_option(BUILD_matlab "Build Matlab wrapper" OFF IF UNIX OR APPLE)
-caffe_option(BUILD_docs   "Build documentation" ON IF UNIX OR APPLE)
 caffe_option(BUILD_python_layer "Build the Caffe Python layer" ON)
 caffe_option(USE_OPENCV "Build with OpenCV support" ON)
 caffe_option(USE_LEVELDB "Build with levelDB" ON)
 caffe_option(USE_LMDB "Build with lmdb" ON)
 caffe_option(ALLOW_LMDB_NOLOCK "Allow MDB_NOLOCK when reading LMDB files (only if necessary)" OFF)
 caffe_option(USE_OPENMP "Link with OpenMP (when your BLAS wants OpenMP and you get linker errors)" OFF)
+
+# HDF5 is not supported on arm platform, turn it off on arm
+if(DISABLE_HDF5_FEAT)
+  set(USE_HDF5 OFF)
+else()
+  set(USE_HDF5 ON)
+endif()
 
 # ---[ Dependencies
 include(cmake/Dependencies.cmake)
@@ -51,6 +61,8 @@ if(UNIX OR APPLE)
 endif()
 
 caffe_set_caffe_link()
+
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -g -pthread -Wfatal-errors -fstack-protector-all -D_FORTIFY_SOURCE=2 -O2")
 
 if(USE_libstdcpp)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -stdlib=libstdc++")
@@ -86,15 +98,18 @@ if(HAVE_CUDA)
   list(APPEND CUDA_NVCC_FLAGS ${Caffe_ALL_DEFINITIONS})
 endif()
 
+
+# Need to include cxx standard include dirs on arm64
+if(CROSS_COMPILE_ARM64)
+  include_directories("${CMAKE_CXX_STANDARD_INCLUDE_DIRECTORIES}")
+endif()
+
 # ---[ Subdirectories
 add_subdirectory(src/gtest)
 add_subdirectory(src/caffe)
 add_subdirectory(tools)
 add_subdirectory(examples)
 add_subdirectory(python)
-add_subdirectory(matlab)
-add_subdirectory(docs)
-
 # ---[ Linter target
 add_custom_target(lint COMMAND ${CMAKE_COMMAND} -P ${PROJECT_SOURCE_DIR}/cmake/lint.cmake)
 

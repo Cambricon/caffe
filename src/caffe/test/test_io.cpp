@@ -1,3 +1,32 @@
+/*
+All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All rights reserved.
+All other contributions:
+Copyright (c) 2014--2018, the respective contributors
+All rights reserved.
+For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+    * Redistributions of source code must retain the above copyright notice,
+      this list of conditions and the following disclaimer.
+    * Redistributions in binary form must reproduce the above copyright
+      notice, this list of conditions and the following disclaimer in the
+      documentation and/or other materials provided with the distribution.
+    * Neither the name of Intel Corporation nor the names of its contributors
+      may be used to endorse or promote products derived from this software
+      without specific prior written permission.
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+*/
+
 #ifdef USE_OPENCV
 #include <opencv2/core/core.hpp>
 #include <opencv2/highgui/highgui.hpp>
@@ -63,16 +92,16 @@ bool ReadImageToDatumReference(const string& filename, const int label,
 }
 
 TEST_F(IOTest, TestReadImageToDatum) {
-  string filename = EXAMPLES_SOURCE_DIR "images/cat.jpg";
+  string filename = string(TEST_SOURCE_DIR())+"dog.jpg";
   Datum datum;
   ReadImageToDatum(filename, 0, &datum);
   EXPECT_EQ(datum.channels(), 3);
-  EXPECT_EQ(datum.height(), 360);
-  EXPECT_EQ(datum.width(), 480);
+  EXPECT_EQ(datum.height(), 576);
+  EXPECT_EQ(datum.width(), 768);
 }
 
 TEST_F(IOTest, TestReadImageToDatumReference) {
-  string filename = EXAMPLES_SOURCE_DIR "images/cat.jpg";
+  string filename = string(TEST_SOURCE_DIR())+"dog.jpg";
   Datum datum, datum_ref;
   ReadImageToDatum(filename, 0, 0, 0, true, &datum);
   ReadImageToDatumReference(filename, 0, 0, 0, true, &datum_ref);
@@ -91,7 +120,7 @@ TEST_F(IOTest, TestReadImageToDatumReference) {
 
 
 TEST_F(IOTest, TestReadImageToDatumReferenceResized) {
-  string filename = EXAMPLES_SOURCE_DIR "images/cat.jpg";
+  string filename = string(TEST_SOURCE_DIR())+"dog.jpg";
   Datum datum, datum_ref;
   ReadImageToDatum(filename, 0, 100, 200, true, &datum);
   ReadImageToDatumReference(filename, 0, 100, 200, true, &datum_ref);
@@ -109,7 +138,7 @@ TEST_F(IOTest, TestReadImageToDatumReferenceResized) {
 }
 
 TEST_F(IOTest, TestReadImageToDatumContent) {
-  string filename = EXAMPLES_SOURCE_DIR "images/cat.jpg";
+  string filename = string(TEST_SOURCE_DIR())+"dog.jpg";
   Datum datum;
   ReadImageToDatum(filename, 0, &datum);
   cv::Mat cv_img = ReadImageToCVMat(filename);
@@ -130,7 +159,7 @@ TEST_F(IOTest, TestReadImageToDatumContent) {
 }
 
 TEST_F(IOTest, TestReadImageToDatumContentGray) {
-  string filename = EXAMPLES_SOURCE_DIR "images/cat.jpg";
+  string filename = string(TEST_SOURCE_DIR())+"dog.jpg";
   Datum datum;
   const bool is_color = false;
   ReadImageToDatum(filename, 0, is_color, &datum);
@@ -149,7 +178,7 @@ TEST_F(IOTest, TestReadImageToDatumContentGray) {
 }
 
 TEST_F(IOTest, TestReadImageToDatumResized) {
-  string filename = EXAMPLES_SOURCE_DIR "images/cat.jpg";
+  string filename = string(TEST_SOURCE_DIR())+"dog.jpg";
   Datum datum;
   ReadImageToDatum(filename, 0, 100, 200, &datum);
   EXPECT_EQ(datum.channels(), 3);
@@ -159,7 +188,7 @@ TEST_F(IOTest, TestReadImageToDatumResized) {
 
 
 TEST_F(IOTest, TestReadImageToDatumResizedSquare) {
-  string filename = EXAMPLES_SOURCE_DIR "images/cat.jpg";
+  string filename = string(TEST_SOURCE_DIR())+"dog.jpg";
   Datum datum;
   ReadImageToDatum(filename, 0, 256, 256, &datum);
   EXPECT_EQ(datum.channels(), 3);
@@ -168,17 +197,17 @@ TEST_F(IOTest, TestReadImageToDatumResizedSquare) {
 }
 
 TEST_F(IOTest, TestReadImageToDatumGray) {
-  string filename = EXAMPLES_SOURCE_DIR "images/cat.jpg";
+  string filename = string(TEST_SOURCE_DIR())+"dog.jpg";
   Datum datum;
   const bool is_color = false;
   ReadImageToDatum(filename, 0, is_color, &datum);
   EXPECT_EQ(datum.channels(), 1);
-  EXPECT_EQ(datum.height(), 360);
-  EXPECT_EQ(datum.width(), 480);
+  EXPECT_EQ(datum.height(), 576);
+  EXPECT_EQ(datum.width(), 768);
 }
 
 TEST_F(IOTest, TestReadImageToDatumResizedGray) {
-  string filename = EXAMPLES_SOURCE_DIR "images/cat.jpg";
+  string filename = string(TEST_SOURCE_DIR())+"dog.jpg";
   Datum datum;
   const bool is_color = false;
   ReadImageToDatum(filename, 0, 256, 256, is_color, &datum);
@@ -188,15 +217,15 @@ TEST_F(IOTest, TestReadImageToDatumResizedGray) {
 }
 
 TEST_F(IOTest, TestReadImageToCVMat) {
-  string filename = EXAMPLES_SOURCE_DIR "images/cat.jpg";
+  string filename = string(TEST_SOURCE_DIR())+"dog.jpg";
   cv::Mat cv_img = ReadImageToCVMat(filename);
   EXPECT_EQ(cv_img.channels(), 3);
-  EXPECT_EQ(cv_img.rows, 360);
-  EXPECT_EQ(cv_img.cols, 480);
+  EXPECT_EQ(cv_img.rows, 576);
+  EXPECT_EQ(cv_img.cols, 768);
 }
 
 TEST_F(IOTest, TestReadImageToCVMatResized) {
-  string filename = EXAMPLES_SOURCE_DIR "images/cat.jpg";
+  string filename = string(TEST_SOURCE_DIR())+"dog.jpg";
   cv::Mat cv_img = ReadImageToCVMat(filename, 100, 200);
   EXPECT_EQ(cv_img.channels(), 3);
   EXPECT_EQ(cv_img.rows, 100);
@@ -204,7 +233,7 @@ TEST_F(IOTest, TestReadImageToCVMatResized) {
 }
 
 TEST_F(IOTest, TestReadImageToCVMatResizedSquare) {
-  string filename = EXAMPLES_SOURCE_DIR "images/cat.jpg";
+  string filename = string(TEST_SOURCE_DIR())+"dog.jpg";
   cv::Mat cv_img = ReadImageToCVMat(filename, 256, 256);
   EXPECT_EQ(cv_img.channels(), 3);
   EXPECT_EQ(cv_img.rows, 256);
@@ -212,16 +241,16 @@ TEST_F(IOTest, TestReadImageToCVMatResizedSquare) {
 }
 
 TEST_F(IOTest, TestReadImageToCVMatGray) {
-  string filename = EXAMPLES_SOURCE_DIR "images/cat.jpg";
+  string filename = string(TEST_SOURCE_DIR())+"dog.jpg";
   const bool is_color = false;
   cv::Mat cv_img = ReadImageToCVMat(filename, is_color);
   EXPECT_EQ(cv_img.channels(), 1);
-  EXPECT_EQ(cv_img.rows, 360);
-  EXPECT_EQ(cv_img.cols, 480);
+  EXPECT_EQ(cv_img.rows, 576);
+  EXPECT_EQ(cv_img.cols, 768);
 }
 
 TEST_F(IOTest, TestReadImageToCVMatResizedGray) {
-  string filename = EXAMPLES_SOURCE_DIR "images/cat.jpg";
+  string filename = string(TEST_SOURCE_DIR())+"dog.jpg";
   const bool is_color = false;
   cv::Mat cv_img = ReadImageToCVMat(filename, 256, 256, is_color);
   EXPECT_EQ(cv_img.channels(), 1);
@@ -230,17 +259,17 @@ TEST_F(IOTest, TestReadImageToCVMatResizedGray) {
 }
 
 TEST_F(IOTest, TestCVMatToDatum) {
-  string filename = EXAMPLES_SOURCE_DIR "images/cat.jpg";
+  string filename = string(TEST_SOURCE_DIR())+"dog.jpg";
   cv::Mat cv_img = ReadImageToCVMat(filename);
   Datum datum;
   CVMatToDatum(cv_img, &datum);
   EXPECT_EQ(datum.channels(), 3);
-  EXPECT_EQ(datum.height(), 360);
-  EXPECT_EQ(datum.width(), 480);
+  EXPECT_EQ(datum.height(), 576);
+  EXPECT_EQ(datum.width(), 768);
 }
 
 TEST_F(IOTest, TestCVMatToDatumContent) {
-  string filename = EXAMPLES_SOURCE_DIR "images/cat.jpg";
+  string filename = string(TEST_SOURCE_DIR())+"dog.jpg";
   cv::Mat cv_img = ReadImageToCVMat(filename);
   Datum datum;
   CVMatToDatum(cv_img, &datum);
@@ -259,7 +288,7 @@ TEST_F(IOTest, TestCVMatToDatumContent) {
 }
 
 TEST_F(IOTest, TestCVMatToDatumReference) {
-  string filename = EXAMPLES_SOURCE_DIR "images/cat.jpg";
+  string filename = string(TEST_SOURCE_DIR())+"dog.jpg";
   cv::Mat cv_img = ReadImageToCVMat(filename);
   Datum datum;
   CVMatToDatum(cv_img, &datum);
@@ -278,16 +307,16 @@ TEST_F(IOTest, TestCVMatToDatumReference) {
 }
 
 TEST_F(IOTest, TestReadFileToDatum) {
-  string filename = EXAMPLES_SOURCE_DIR "images/cat.jpg";
+  string filename = string(TEST_SOURCE_DIR())+"dog.jpg";
   Datum datum;
   EXPECT_TRUE(ReadFileToDatum(filename, &datum));
   EXPECT_TRUE(datum.encoded());
   EXPECT_EQ(datum.label(), -1);
-  EXPECT_EQ(datum.data().size(), 140391);
+  EXPECT_EQ(datum.data().size(), 163759);
 }
 
 TEST_F(IOTest, TestDecodeDatum) {
-  string filename = EXAMPLES_SOURCE_DIR "images/cat.jpg";
+  string filename = string(TEST_SOURCE_DIR())+"dog.jpg";
   Datum datum;
   EXPECT_TRUE(ReadFileToDatum(filename, &datum));
   EXPECT_TRUE(DecodeDatum(&datum, true));
@@ -307,21 +336,21 @@ TEST_F(IOTest, TestDecodeDatum) {
 }
 
 TEST_F(IOTest, TestDecodeDatumToCVMat) {
-  string filename = EXAMPLES_SOURCE_DIR "images/cat.jpg";
+  string filename = string(TEST_SOURCE_DIR())+"dog.jpg";
   Datum datum;
   EXPECT_TRUE(ReadFileToDatum(filename, &datum));
   cv::Mat cv_img = DecodeDatumToCVMat(datum, true);
   EXPECT_EQ(cv_img.channels(), 3);
-  EXPECT_EQ(cv_img.rows, 360);
-  EXPECT_EQ(cv_img.cols, 480);
+  EXPECT_EQ(cv_img.rows, 576);
+  EXPECT_EQ(cv_img.cols, 768);
   cv_img = DecodeDatumToCVMat(datum, false);
   EXPECT_EQ(cv_img.channels(), 1);
-  EXPECT_EQ(cv_img.rows, 360);
-  EXPECT_EQ(cv_img.cols, 480);
+  EXPECT_EQ(cv_img.rows, 576);
+  EXPECT_EQ(cv_img.cols, 768);
 }
 
 TEST_F(IOTest, TestDecodeDatumToCVMatContent) {
-  string filename = EXAMPLES_SOURCE_DIR "images/cat.jpg";
+  string filename = string(TEST_SOURCE_DIR())+"dog.jpg";
   Datum datum;
   EXPECT_TRUE(ReadImageToDatum(filename, 0, std::string("jpg"), &datum));
   cv::Mat cv_img = DecodeDatumToCVMat(datum, true);
@@ -341,7 +370,7 @@ TEST_F(IOTest, TestDecodeDatumToCVMatContent) {
 }
 
 TEST_F(IOTest, TestDecodeDatumNative) {
-  string filename = EXAMPLES_SOURCE_DIR "images/cat.jpg";
+  string filename = string(TEST_SOURCE_DIR())+"dog.jpg";
   Datum datum;
   EXPECT_TRUE(ReadFileToDatum(filename, &datum));
   EXPECT_TRUE(DecodeDatumNative(&datum));
@@ -361,23 +390,23 @@ TEST_F(IOTest, TestDecodeDatumNative) {
 }
 
 TEST_F(IOTest, TestDecodeDatumToCVMatNative) {
-  string filename = EXAMPLES_SOURCE_DIR "images/cat.jpg";
+  string filename = string(TEST_SOURCE_DIR())+"dog.jpg";
   Datum datum;
   EXPECT_TRUE(ReadFileToDatum(filename, &datum));
   cv::Mat cv_img = DecodeDatumToCVMatNative(datum);
   EXPECT_EQ(cv_img.channels(), 3);
-  EXPECT_EQ(cv_img.rows, 360);
-  EXPECT_EQ(cv_img.cols, 480);
+  EXPECT_EQ(cv_img.rows, 576);
+  EXPECT_EQ(cv_img.cols, 768);
 }
 
 TEST_F(IOTest, TestDecodeDatumNativeGray) {
-  string filename = EXAMPLES_SOURCE_DIR "images/cat_gray.jpg";
+  string filename = string(TEST_SOURCE_DIR())+"dog.jpg";
   Datum datum;
   EXPECT_TRUE(ReadFileToDatum(filename, &datum));
   EXPECT_TRUE(DecodeDatumNative(&datum));
   EXPECT_FALSE(DecodeDatumNative(&datum));
   Datum datum_ref;
-  ReadImageToDatumReference(filename, 0, 0, 0, false, &datum_ref);
+  ReadImageToDatumReference(filename, 0, 0, 0, true, &datum_ref);
   EXPECT_EQ(datum.channels(), datum_ref.channels());
   EXPECT_EQ(datum.height(), datum_ref.height());
   EXPECT_EQ(datum.width(), datum_ref.width());
@@ -391,17 +420,17 @@ TEST_F(IOTest, TestDecodeDatumNativeGray) {
 }
 
 TEST_F(IOTest, TestDecodeDatumToCVMatNativeGray) {
-  string filename = EXAMPLES_SOURCE_DIR "images/cat_gray.jpg";
+  string filename = string(TEST_SOURCE_DIR())+"dog.jpg";
   Datum datum;
   EXPECT_TRUE(ReadFileToDatum(filename, &datum));
   cv::Mat cv_img = DecodeDatumToCVMatNative(datum);
-  EXPECT_EQ(cv_img.channels(), 1);
-  EXPECT_EQ(cv_img.rows, 360);
-  EXPECT_EQ(cv_img.cols, 480);
+  EXPECT_EQ(cv_img.channels(), 3);
+  EXPECT_EQ(cv_img.rows, 576);
+  EXPECT_EQ(cv_img.cols, 768);
 }
 
 TEST_F(IOTest, TestDecodeDatumToCVMatContentNative) {
-  string filename = EXAMPLES_SOURCE_DIR "images/cat.jpg";
+  string filename = string(TEST_SOURCE_DIR())+"dog.jpg";
   Datum datum;
   EXPECT_TRUE(ReadImageToDatum(filename, 0, std::string("jpg"), &datum));
   cv::Mat cv_img = DecodeDatumToCVMatNative(datum);

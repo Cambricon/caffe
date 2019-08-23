@@ -1,3 +1,32 @@
+/*
+All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All rights reserved.
+All other contributions:
+Copyright (c) 2014--2018, the respective contributors
+All rights reserved.
+For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+    * Redistributions of source code must retain the above copyright notice,
+      this list of conditions and the following disclaimer.
+    * Redistributions in binary form must reproduce the above copyright
+      notice, this list of conditions and the following disclaimer in the
+      documentation and/or other materials provided with the distribution.
+    * Neither the name of Intel Corporation nor the names of its contributors
+      may be used to endorse or promote products derived from this software
+      without specific prior written permission.
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+*/
+
 #include <cstdio>
 
 #include <string>
@@ -11,11 +40,19 @@
 
 namespace caffe {
 
+/**
+ * @brief Set the action function of Solver which provide indication that it
+ *        wants a snapshot saved and/or to exit early.
+ */
 template<typename Dtype>
 void Solver<Dtype>::SetActionFunction(ActionCallback func) {
   action_request_function_ = func;
 }
 
+/**
+ * @brief Return the type of solver action. If external action request function
+ *        has been set, execute it before return.
+ */
 template<typename Dtype>
 SolverAction::Enum Solver<Dtype>::GetRequestedAction() {
   if (action_request_function_) {
@@ -25,12 +62,18 @@ SolverAction::Enum Solver<Dtype>::GetRequestedAction() {
   return SolverAction::NONE;
 }
 
+/*
+ * @brief Construct a Solver instance from a SolverParameter instance.
+ */
 template <typename Dtype>
 Solver<Dtype>::Solver(const SolverParameter& param)
     : net_(), callbacks_(), requested_early_exit_(false) {
   Init(param);
 }
 
+/*
+ * @brief Given a path of proto file, construct an instance of Solver from it.
+ */
 template <typename Dtype>
 Solver<Dtype>::Solver(const string& param_file)
     : net_(), callbacks_(), requested_early_exit_(false) {
@@ -39,6 +82,12 @@ Solver<Dtype>::Solver(const string& param_file)
   Init(param);
 }
 
+/*
+ * @brief Initialize solver from a solver parameter.
+ *
+ * The init function gives member variables initial value and initialize train
+ * net and test nets.
+ */
 template <typename Dtype>
 void Solver<Dtype>::Init(const SolverParameter& param) {
   LOG_IF(INFO, Caffe::root_solver()) << "Initializing solver from parameters: "
@@ -59,6 +108,9 @@ void Solver<Dtype>::Init(const SolverParameter& param) {
   current_step_ = 0;
 }
 
+/**
+ * @brief Initialize the train net with member variables of Solver.
+ */
 template <typename Dtype>
 void Solver<Dtype>::InitTrainNet() {
   const int num_train_nets = param_.has_net() + param_.has_net_param() +
@@ -100,6 +152,9 @@ void Solver<Dtype>::InitTrainNet() {
   net_.reset(new Net<Dtype>(net_param));
 }
 
+/**
+ * @brief Initialize test nets with member variables of Solver.
+ */
 template <typename Dtype>
 void Solver<Dtype>::InitTestNets() {
   const bool has_net_param = param_.has_net_param();
@@ -176,6 +231,9 @@ void Solver<Dtype>::InitTestNets() {
   }
 }
 
+/**
+ * @brief Iterate the net for <code>iters</code> times.
+ */
 template <typename Dtype>
 void Solver<Dtype>::Step(int iters) {
   const int start_iter = iter_;
@@ -266,6 +324,9 @@ void Solver<Dtype>::Step(int iters) {
   }
 }
 
+/**
+ * @brief Start training a new net or resume training for a pre-trained net.
+ */
 template <typename Dtype>
 void Solver<Dtype>::Solve(const char* resume_file) {
   CHECK(Caffe::root_solver());
@@ -315,6 +376,9 @@ void Solver<Dtype>::Solve(const char* resume_file) {
   LOG(INFO) << "Optimization Done.";
 }
 
+/**
+ * @brief Test each net in <code>test_nets_</code>.
+ */
 template <typename Dtype>
 void Solver<Dtype>::TestAll() {
   for (int test_net_id = 0;
@@ -324,6 +388,9 @@ void Solver<Dtype>::TestAll() {
   }
 }
 
+/**
+ * @brief Test given net. Display the loss and results on test cases.
+ */
 template <typename Dtype>
 void Solver<Dtype>::Test(const int test_net_id) {
   CHECK(Caffe::root_solver());
@@ -357,7 +424,9 @@ void Solver<Dtype>::Test(const int test_net_id) {
     if (param_.test_compute_loss()) {
       loss += iter_loss;
     }
+
     if (i == 0) {
+      // In first loop, initialize test_score and test_score_output_id.
       for (int j = 0; j < result.size(); ++j) {
         const Dtype* result_vec = result[j]->cpu_data();
         for (int k = 0; k < result[j]->count(); ++k) {
@@ -366,6 +435,7 @@ void Solver<Dtype>::Test(const int test_net_id) {
         }
       }
     } else {
+      // Not in first loop, update test_score.
       int idx = 0;
       for (int j = 0; j < result.size(); ++j) {
         const Dtype* result_vec = result[j]->cpu_data();
@@ -399,6 +469,13 @@ void Solver<Dtype>::Test(const int test_net_id) {
   }
 }
 
+/**
+ * @brief Implements the basic snapshotting utility that stores the learned net.
+ *
+ * You should implement the SnapshotSolverState() function that produces a
+ * SolverState protocol buffer that needs to be written to disk together with
+ * the learned net.
+ */
 template <typename Dtype>
 void Solver<Dtype>::Snapshot() {
   CHECK(Caffe::root_solver());
@@ -417,6 +494,12 @@ void Solver<Dtype>::Snapshot() {
   SnapshotSolverState(model_filename);
 }
 
+/**
+ * @brief Check if writting a file is permissible.
+ *
+ * Snapshot prefix is acquired. Create a temple file to test if it's permissible
+ * to write a file. After temple file created successfully, it would be deleted.
+ */
 template <typename Dtype>
 void Solver<Dtype>::CheckSnapshotWritePermissions() {
   if (Caffe::root_solver() && param_.snapshot()) {
@@ -435,12 +518,21 @@ void Solver<Dtype>::CheckSnapshotWritePermissions() {
   }
 }
 
+/**
+ * @brief Given an extension name, generate a uniform name to name a snapshot
+ *        file. The format of snapshot file name is: prefix + _iter_ +
+ *        iterations trained + extension name.
+ */
 template <typename Dtype>
 string Solver<Dtype>::SnapshotFilename(const string extension) {
   return param_.snapshot_prefix() + "_iter_" + caffe::format_int(iter_)
     + extension;
 }
 
+/**
+ * @brief Save the snapshot file to a binary proto file with .caffemodel as
+ *        extension name.
+ */
 template <typename Dtype>
 string Solver<Dtype>::SnapshotToBinaryProto() {
   string model_filename = SnapshotFilename(".caffemodel");
@@ -451,6 +543,10 @@ string Solver<Dtype>::SnapshotToBinaryProto() {
   return model_filename;
 }
 
+/**
+ * @brief Save the snapshot file to a HDF5 format file with .caffemodel.h5 as
+ *        extension name.
+ */
 template <typename Dtype>
 string Solver<Dtype>::SnapshotToHDF5() {
   string model_filename = SnapshotFilename(".caffemodel.h5");
@@ -459,6 +555,11 @@ string Solver<Dtype>::SnapshotToHDF5() {
   return model_filename;
 }
 
+/**
+ * @brief Restore the state from given state file. Dispatch to an appropriate
+ *        method of the RestoreSolverStateFrom___ methods to execute according
+ *        to the type of state file.
+ */
 template <typename Dtype>
 void Solver<Dtype>::Restore(const char* state_file) {
   string state_filename(state_file);
@@ -470,6 +571,9 @@ void Solver<Dtype>::Restore(const char* state_file) {
   }
 }
 
+/**
+ * @brief Use mean filtering to smooth the loss.
+ */
 template <typename Dtype>
 void Solver<Dtype>::UpdateSmoothedLoss(Dtype loss, int start_iter,
     int average_loss) {

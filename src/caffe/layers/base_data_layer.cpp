@@ -1,3 +1,32 @@
+/*
+All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All rights reserved.
+All other contributions:
+Copyright (c) 2014--2018, the respective contributors
+All rights reserved.
+For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+    * Redistributions of source code must retain the above copyright notice,
+      this list of conditions and the following disclaimer.
+    * Redistributions in binary form must reproduce the above copyright
+      notice, this list of conditions and the following disclaimer in the
+      documentation and/or other materials provided with the distribution.
+    * Neither the name of Intel Corporation nor the names of its contributors
+      may be used to endorse or promote products derived from this software
+      without specific prior written permission.
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+*/
+
 #include <boost/thread.hpp>
 #include <vector>
 
@@ -59,7 +88,7 @@ void BasePrefetchingDataLayer<Dtype>::LayerSetUp(
       prefetch_[i]->label_.mutable_cpu_data();
     }
   }
-#ifndef CPU_ONLY
+#ifdef USE_CUDA
   if (Caffe::mode() == Caffe::GPU) {
     for (int i = 0; i < prefetch_.size(); ++i) {
       prefetch_[i]->data_.mutable_gpu_data();
@@ -77,7 +106,7 @@ void BasePrefetchingDataLayer<Dtype>::LayerSetUp(
 
 template <typename Dtype>
 void BasePrefetchingDataLayer<Dtype>::InternalThreadEntry() {
-#ifndef CPU_ONLY
+#ifdef USE_CUDA
   cudaStream_t stream;
   if (Caffe::mode() == Caffe::GPU) {
     CUDA_CHECK(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking));
@@ -88,7 +117,7 @@ void BasePrefetchingDataLayer<Dtype>::InternalThreadEntry() {
     while (!must_stop()) {
       Batch<Dtype>* batch = prefetch_free_.pop();
       load_batch(batch);
-#ifndef CPU_ONLY
+#ifdef USE_CUDA
       if (Caffe::mode() == Caffe::GPU) {
         batch->data_.data().get()->async_gpu_push(stream);
         if (this->output_labels_) {
@@ -102,7 +131,7 @@ void BasePrefetchingDataLayer<Dtype>::InternalThreadEntry() {
   } catch (boost::thread_interrupted&) {
     // Interrupted exception is expected on shutdown
   }
-#ifndef CPU_ONLY
+#ifdef USE_CUDA
   if (Caffe::mode() == Caffe::GPU) {
     CUDA_CHECK(cudaStreamDestroy(stream));
   }
@@ -116,17 +145,28 @@ void BasePrefetchingDataLayer<Dtype>::Forward_cpu(
     prefetch_free_.push(prefetch_current_);
   }
   prefetch_current_ = prefetch_full_.pop("Waiting for data");
-  // Reshape to loaded data.
-  top[0]->ReshapeLike(prefetch_current_->data_);
+
+#ifdef USE_MLU
+  if (Caffe::reshapeMode() == Caffe::ReshapeMode::ALWAYS) {
+    top[0]->Reshape(prefetch_current_->data_.shape());
+  }
+#else
+  top[0]->Reshape(prefetch_current_->data_.shape());
+#endif
   top[0]->set_cpu_data(prefetch_current_->data_.mutable_cpu_data());
   if (this->output_labels_) {
-    // Reshape to loaded labels.
+#ifdef USE_MLU
+    if (Caffe::reshapeMode() == Caffe::ReshapeMode::ALWAYS) {
+      top[1]->ReshapeLike(prefetch_current_->label_);
+    }
+#else
     top[1]->ReshapeLike(prefetch_current_->label_);
+#endif
     top[1]->set_cpu_data(prefetch_current_->label_.mutable_cpu_data());
   }
 }
 
-#ifdef CPU_ONLY
+#ifndef USE_CUDA
 STUB_GPU_FORWARD(BasePrefetchingDataLayer, Forward);
 #endif
 

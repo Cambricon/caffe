@@ -1,3 +1,32 @@
+/*
+All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All rights reserved.
+All other contributions:
+Copyright (c) 2014--2018, the respective contributors
+All rights reserved.
+For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+    * Redistributions of source code must retain the above copyright notice,
+      this list of conditions and the following disclaimer.
+    * Redistributions in binary form must reproduce the above copyright
+      notice, this list of conditions and the following disclaimer in the
+      documentation and/or other materials provided with the distribution.
+    * Neither the name of Intel Corporation nor the names of its contributors
+      may be used to endorse or promote products derived from this software
+      without specific prior written permission.
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+*/
+
 // This program converts a set of images to a lmdb/leveldb by storing them
 // as Datum proto buffers.
 // Usage:
@@ -25,15 +54,11 @@
 #include "caffe/util/rng.hpp"
 
 using namespace caffe;  // NOLINT(build/namespaces)
-using std::pair;
 using boost::scoped_ptr;
 
-DEFINE_bool(gray, false,
-    "When this option is on, treat images as grayscale ones");
-DEFINE_bool(shuffle, false,
-    "Randomly shuffle the order of images and their labels");
-DEFINE_string(backend, "lmdb",
-        "The backend {lmdb, leveldb} for storing the result");
+DEFINE_bool(gray, false, "When this option is on, treat images as grayscale ones");
+DEFINE_bool(shuffle, false, "Randomly shuffle the order of images and their labels");
+DEFINE_string(backend, "lmdb", "The backend {lmdb, leveldb} for storing the result");
 DEFINE_int32(resize_width, 0, "Width images are resized to");
 DEFINE_int32(resize_height, 0, "Height images are resized to");
 DEFINE_bool(check_size, false,
@@ -53,12 +78,13 @@ int main(int argc, char** argv) {
   namespace gflags = google;
 #endif
 
-  gflags::SetUsageMessage("Convert a set of images to the leveldb/lmdb\n"
-        "format used as input for Caffe.\n"
-        "Usage:\n"
-        "    convert_imageset [FLAGS] ROOTFOLDER/ LISTFILE DB_NAME\n"
-        "The ImageNet dataset for the training demo is at\n"
-        "    http://www.image-net.org/download-images\n");
+  gflags::SetUsageMessage(
+      "Convert a set of images to the leveldb/lmdb\n"
+      "format used as input for Caffe.\n"
+      "Usage:\n"
+      "    convert_imageset [FLAGS] ROOTFOLDER/ LISTFILE DB_NAME\n"
+      "The ImageNet dataset for the training demo is at\n"
+      "    http://www.image-net.org/download-images\n");
   gflags::ParseCommandLineFlags(&argc, &argv, true);
 
   if (argc < 4) {
@@ -72,7 +98,7 @@ int main(int argc, char** argv) {
   const string encode_type = FLAGS_encode_type;
 
   std::ifstream infile(argv[2]);
-  std::vector<std::pair<std::string, int> > lines;
+  std::vector<std::pair<std::string, int>> lines;
   std::string line;
   size_t pos;
   int label;
@@ -113,23 +139,30 @@ int main(int argc, char** argv) {
       // Guess the encoding type from the file name
       string fn = lines[line_id].first;
       size_t p = fn.rfind('.');
-      if ( p == fn.npos )
+      if (p == fn.npos) {
         LOG(WARNING) << "Failed to guess the encoding of '" << fn << "'";
+      }
       enc = fn.substr(p);
       std::transform(enc.begin(), enc.end(), enc.begin(), ::tolower);
     }
-    status = ReadImageToDatum(root_folder + lines[line_id].first,
-        lines[line_id].second, resize_height, resize_width, is_color,
-        enc, &datum);
-    if (status == false) continue;
+    status = ReadImageToDatum(
+        root_folder + lines[line_id].first,
+        lines[line_id].second,
+        resize_height,
+        resize_width,
+        is_color,
+        enc,
+        &datum);
+    if (status == false) {
+      continue;
+    }
     if (check_size) {
       if (!data_size_initialized) {
         data_size = datum.channels() * datum.height() * datum.width();
         data_size_initialized = true;
       } else {
         const std::string& data = datum.data();
-        CHECK_EQ(data.size(), data_size) << "Incorrect data field size "
-            << data.size();
+        CHECK_EQ(data.size(), data_size) << "Incorrect data field size " << data.size();
       }
     }
     // sequential

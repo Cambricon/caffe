@@ -30,7 +30,7 @@ __global__ void im2col_nd_gpu_kernel(const int n, const Dtype* data_im,
 
 template <typename Dtype>
 class Im2colKernelTest : public GPUDeviceTest<Dtype> {
- protected:
+  protected:
   Im2colKernelTest()
         // big so launches > 1024 threads
       : blob_bottom_(new Blob<Dtype>(5, 500, 15, 15)),

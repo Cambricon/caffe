@@ -4,5 +4,5 @@ target_include_directories(gtest PUBLIC ${Caffe_SRC_DIR})
 target_compile_definitions(gtest PUBLIC -DGTEST_USE_OWN_TR1_TUPLE)
 
 
-#add_library(gtest_main gtest_main.cc)
-#target_link_libraries(gtest_main gtest)
+add_library(gtest_main gtest_main.cc)
+target_link_libraries(gtest_main gtest)

@@ -1,5 +1,34 @@
-#ifndef CAFFE_BLOB_HPP_
-#define CAFFE_BLOB_HPP_
+/*
+All modification made by Cambricon Corporation: © 2018--2019 Cambricon Corporation
+All rights reserved.
+All other contributions:
+Copyright (c) 2014--2018, the respective contributors
+All rights reserved.
+For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+    * Redistributions of source code must retain the above copyright notice,
+      this list of conditions and the following disclaimer.
+    * Redistributions in binary form must reproduce the above copyright
+      notice, this list of conditions and the following disclaimer in the
+      documentation and/or other materials provided with the distribution.
+    * Neither the name of Intel Corporation nor the names of its contributors
+      may be used to endorse or promote products derived from this software
+      without specific prior written permission.
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+*/
+
+#ifndef INCLUDE_CAFFE_BLOB_HPP_
+#define INCLUDE_CAFFE_BLOB_HPP_
 
 #include <algorithm>
 #include <string>
@@ -9,7 +38,7 @@
 #include "caffe/proto/caffe.pb.h"
 #include "caffe/syncedmem.hpp"
 
-const int kMaxBlobAxes = 32;
+const int kMaxBlobAxes = 4;  ///< max dimensions of a blob, limited by CNML
 
 namespace caffe {
 
@@ -18,22 +47,81 @@ namespace caffe {
  *        computational unit through which Layer%s, Net%s, and Solver%s
  *        interact.
  *
- * TODO(dox): more thorough description.
+ * Caffe stores and communicates data using blobs.
+ *
+ * Blobs provides a unified memory interface holding data;
+ * e.g., batches of images,model parameters,and derivatives for optimization.
+ *
+ * The conventional blob dimensions for batches of image data
+ * are N*C*H*W, i.e. number,channel,height,width.
+ *
+ * number is the batch size of the data,
+ * if you don't know it, check out how batch gradient descent work
+ * in a simple fully-connect neural network.
+ *
+ * channel is the feature dimension,take an 256*256 RGB image for instance,
+ * it has the Red,Green,Blue feature maps, each feature map is arithmetically
+ * a 256*256 matrix,whose value ranges from 0 - 1 to infer the intensity of
+ * some specific color.
+ *
+ * height and weight are used to uniquely identify a point in a feature map.
+ *
+ * Blob memory is row-major(memory are physically linear bytes) in layout,
+ * so the rightmost dimension changes fastest
+ * (in the NCHW case, W changes fastest).
+ *
+ * e.g. in a 4D blob,the value at index(n,c,h,w)
+ * is located at index ((n*K+k)*H+h)*W+w physically.
+ * see the offset function,draw an example,and figure out how it works.
+ * this is very important.
+ *
+ * Note that not all blobs in Caffe are 4D
+ * recall the simplest fully-connected neural network
+ * all the data in it are 2D,i.e. batch size and neuron number in each layer.
+ * you can pass h=1 and w=1 to the Blob constructor to get this.
+ *
+ * Parameter blob dimensions vary according to the type and configuration of
+ * the layer. For a convolution layer with 96 filters(of kernels) of 11 * 11
+ * spatial dimension and 3 input channels, the blob shape is 96 * 3 * 11 * 11.
+ * For an inner product/fully-connected layer with 1000 output channels and
+ * 1024 input channels,the parameter blob is 1000 * 1024.
  */
 template <typename Dtype>
 class Blob {
- public:
+  public:
   Blob()
-       : data_(), diff_(), count_(0), capacity_(0) {}
+      : data_(),
+        diff_(),
+        count_(0),
+        capacity_(0)
+#ifdef USE_MLU
+        ,
+        shape_order_(CNML_NCHW)
+#endif
+  {
+  }
 
   /// @brief Deprecated; use <code>Blob(const vector<int>& shape)</code>.
   explicit Blob(const int num, const int channels, const int height,
-      const int width);
+                const int width);
   explicit Blob(const vector<int>& shape);
+#ifdef USE_MLU
+  explicit Blob(const int num, const int channels, const int height,
+                const int width, BaseDataType cpu_type, BaseDataType mlu_type,
+                cnmlTensorType_t tensor_type);
+  Blob(const vector<int>& shape, BaseDataType cpu_type, BaseDataType mlu_type,
+       cnmlTensorType_t tensor_type, cnmlDataOrder_t shape_order = CNML_NCHW);
+#endif
 
   /// @brief Deprecated; use <code>Reshape(const vector<int>& shape)</code>.
   void Reshape(const int num, const int channels, const int height,
-      const int width);
+               const int width);
+#ifdef USE_MLU
+  void Reshape(const int num, const int channels, const int height,
+               const int width, BaseDataType cpu_type, BaseDataType mlu_type,
+               cnmlTensorType_t tensor_type);
+#endif
+
   /**
    * @brief Change the dimensions of the blob, allocating new memory if
    *        necessary.
@@ -49,8 +137,23 @@ class Blob {
    * propagate the new input shape to higher layers.
    */
   void Reshape(const vector<int>& shape);
+#ifdef USE_MLU
+  void Reshape(const vector<int>& shape, BaseDataType cpu_type,
+               BaseDataType mlu_type, cnmlTensorType_t tensor_type,
+               cnmlDataOrder_t shape_order = CNML_NCHW);
+#endif
+
   void Reshape(const BlobShape& shape);
+#ifdef USE_MLU
+  void Reshape(const BlobShape& shape, BaseDataType cpu_type,
+               BaseDataType mlu_type, cnmlTensorType_t tensor_type,
+               cnmlDataOrder_t shape_order = CNML_NCHW);
+#endif
   void ReshapeLike(const Blob& other);
+  /**
+   * @brief Returns the shape string of a blob
+   * e.g. 2 2 1 1(4)
+   */
   inline string shape_string() const {
     ostringstream stream;
     for (int i = 0; i < shape_.size(); ++i) {
@@ -119,9 +222,9 @@ class Blob {
     CHECK_GE(axis_index, -num_axes())
         << "axis " << axis_index << " out of range for " << num_axes()
         << "-D Blob with shape " << shape_string();
-    CHECK_LT(axis_index, num_axes())
-        << "axis " << axis_index << " out of range for " << num_axes()
-        << "-D Blob with shape " << shape_string();
+    CHECK_LT(axis_index, num_axes()) << "axis " << axis_index
+                                     << " out of range for " << num_axes()
+                                     << "-D Blob with shape " << shape_string();
     if (axis_index < 0) {
       return axis_index + num_axes();
     }
@@ -149,9 +252,17 @@ class Blob {
     }
     return shape(index);
   }
-
+  /**
+   * @brief Return the position of a specfic data
+   *        e.g. if you have batches of pictures, and you want to get the memory
+   * position
+   *        of the pixel in batch 3,channel 2,height 256 and width 256.
+   *        you can use your_blob->cpu_data()[offset(3,2,256,256)] to get its
+   * value,or use
+   *        the data_at function,which is a simple wrapper for offset.
+   */
   inline int offset(const int n, const int c = 0, const int h = 0,
-      const int w = 0) const {
+                    const int w = 0) const {
     CHECK_GE(n, 0);
     CHECK_LE(n, num());
     CHECK_GE(channels(), 0);
@@ -186,15 +297,17 @@ class Blob {
    *        shape if necessary
    */
   void CopyFrom(const Blob<Dtype>& source, bool copy_diff = false,
-      bool reshape = false);
-
+                bool reshape = false);
+  /**
+   * @brief A simple wrapper for offset
+   */
   inline Dtype data_at(const int n, const int c, const int h,
-      const int w) const {
+                       const int w) const {
     return cpu_data()[offset(n, c, h, w)];
   }
 
   inline Dtype diff_at(const int n, const int c, const int h,
-      const int w) const {
+                       const int w) const {
     return cpu_diff()[offset(n, c, h, w)];
   }
 
@@ -223,13 +336,67 @@ class Blob {
   void set_gpu_data(Dtype* data);
   const Dtype* cpu_diff() const;
   const Dtype* gpu_diff() const;
+
+#ifdef USE_MLU
+  const Dtype* mlu_data();
+  void set_mlu_data(Dtype* data);
+  Dtype* mutable_mlu_data();
+
+  cnmlTensor_t mlu_tensor() {
+    mlu_tensor_desc_.mluCreate();
+    return mlu_tensor_desc_.mlu();
+  }
+  cnmlCpuTensor_t cpu_tensor() {
+    mlu_tensor_desc_.cpuCreate();
+    return mlu_tensor_desc_.cpu();
+  }
+  void set_mlu_position(int position) {
+    mlu_tensor_desc_.set_position(position);
+  }
+  void set_mlu_positions(const vector<int>& positions) {
+    mlu_tensor_desc_.set_positions(positions);
+  }
+  const int mlu_position() const { return mlu_tensor_desc_.position(); }
+  const vector<int>& mlu_positions() const {
+      return mlu_tensor_desc_.positions();
+  }
+  void set_mlu_scale(float scale) { mlu_tensor_desc_.set_scale(scale); }
+  void set_mlu_scales(const vector<float>& scales) {
+     mlu_tensor_desc_.set_scales(scales);
+  }
+  const float mlu_scale() const { return mlu_tensor_desc_.scale(); }
+  const vector<float>& mlu_scales() const {
+      return mlu_tensor_desc_.scales();
+  }
+  void set_cpu_type(BaseDataType cpu_dtype) {
+    mlu_tensor_desc_.set_cpu_type(cpu_dtype);
+  }
+  const BaseDataType cpu_type() const { return mlu_tensor_desc_.cpu_type(); }
+  void set_mlu_type(BaseDataType mlu_dtype) {
+    mlu_tensor_desc_.set_mlu_type(mlu_dtype);
+  }
+  const BaseDataType mlu_type() const { return mlu_tensor_desc_.mlu_type(); }
+  cnmlTensorType_t tensor_type() { return mlu_tensor_desc_.type(); }
+  bool has_mlu_position() const { return mlu_tensor_desc_.has_position(); }
+  bool has_mlu_scale() const { return mlu_tensor_desc_.has_scale(); }
+  void setCpuTensorOrder(cnmlDataOrder_t order) {
+    mlu_tensor_desc_.setCpuTensorOrder(order);
+  }
+
+#endif
+
   Dtype* mutable_cpu_data();
   Dtype* mutable_gpu_data();
   Dtype* mutable_cpu_diff();
   Dtype* mutable_gpu_diff();
   void Update();
+  /// @brief Construct a blob from prototxt
   void FromProto(const BlobProto& proto, bool reshape = true);
+  /// @brief Save a blob's information to prototxt
   void ToProto(BlobProto* proto, bool write_diff = false) const;
+#ifdef USE_MLU
+  void ToProto(BlobProto* proto, bool write_diff, float sparsity);
+#endif
 
   /// @brief Compute the sum of absolute values (L1 norm) of the data.
   Dtype asum_data() const;
@@ -263,20 +430,35 @@ class Blob {
    * shared_ptr calls its destructor when reset with the "=" operator.
    */
   void ShareDiff(const Blob& other);
-
+  /**
+   * @brief Judge whether the blob's shape is identical to another.
+   */
   bool ShapeEquals(const BlobProto& other);
 
- protected:
+  /**
+   * @brief Judge whether the blob's count is identical to another.
+   */
+  bool CountEquals(const BlobProto& other);
+
+  /**
+   * @brief Judge whether the blob's count / 4 * 3 is identical to another.
+   */
+  bool CountGE3(const BlobProto& other);
+
+  protected:
   shared_ptr<SyncedMemory> data_;
   shared_ptr<SyncedMemory> diff_;
   shared_ptr<SyncedMemory> shape_data_;
   vector<int> shape_;
-  int count_;
-  int capacity_;
-
+  int count_;     ///< the product of all a blob's dimensions.
+  int capacity_;  ///< use to check whether to ask for more memory.
+#ifdef USE_MLU
+  cnmlDataOrder_t shape_order_;
+  MLUTensorDesc mlu_tensor_desc_;
+#endif
   DISABLE_COPY_AND_ASSIGN(Blob);
 };  // class Blob
 
 }  // namespace caffe
 
-#endif  // CAFFE_BLOB_HPP_
+#endif  // INCLUDE_CAFFE_BLOB_HPP_

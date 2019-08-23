@@ -1,24 +1,54 @@
+/*
+All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All rights reserved.
+All other contributions:
+Copyright (c) 2014--2018, the respective contributors
+All rights reserved.
+For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+    * Redistributions of source code must retain the above copyright notice,
+      this list of conditions and the following disclaimer.
+    * Redistributions in binary form must reproduce the above copyright
+      notice, this list of conditions and the following disclaimer in the
+      documentation and/or other materials provided with the distribution.
+    * Neither the name of Intel Corporation nor the names of its contributors
+      may be used to endorse or promote products derived from this software
+      without specific prior written permission.
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+*/
+
+#ifndef INCLUDE_CAFFE_UTIL_DB_LMDB_HPP_
+#define INCLUDE_CAFFE_UTIL_DB_LMDB_HPP_
 #ifdef USE_LMDB
-#ifndef CAFFE_UTIL_DB_LMDB_HPP
-#define CAFFE_UTIL_DB_LMDB_HPP
 
 #include <string>
 #include <vector>
 
-#include "lmdb.h"
+#include "lmdb.h"  // NOLINT
 
 #include "caffe/util/db.hpp"
 
-namespace caffe { namespace db {
+namespace caffe {
+namespace db {
 
 inline void MDB_CHECK(int mdb_status) {
   CHECK_EQ(mdb_status, MDB_SUCCESS) << mdb_strerror(mdb_status);
 }
 
 class LMDBCursor : public Cursor {
- public:
+  public:
   explicit LMDBCursor(MDB_txn* mdb_txn, MDB_cursor* mdb_cursor)
-    : mdb_txn_(mdb_txn), mdb_cursor_(mdb_cursor), valid_(false) {
+      : mdb_txn_(mdb_txn), mdb_cursor_(mdb_cursor), valid_(false) {
     SeekToFirst();
   }
   virtual ~LMDBCursor() {
@@ -32,11 +62,11 @@ class LMDBCursor : public Cursor {
   }
   virtual string value() {
     return string(static_cast<const char*>(mdb_value_.mv_data),
-        mdb_value_.mv_size);
+                  mdb_value_.mv_size);
   }
   virtual bool valid() { return valid_; }
 
- private:
+  private:
   void Seek(MDB_cursor_op op) {
     int mdb_status = mdb_cursor_get(mdb_cursor_, &mdb_key_, &mdb_value_, op);
     if (mdb_status == MDB_NOTFOUND) {
@@ -54,13 +84,12 @@ class LMDBCursor : public Cursor {
 };
 
 class LMDBTransaction : public Transaction {
- public:
-  explicit LMDBTransaction(MDB_env* mdb_env)
-    : mdb_env_(mdb_env) { }
+  public:
+  explicit LMDBTransaction(MDB_env* mdb_env) : mdb_env_(mdb_env) {}
   virtual void Put(const string& key, const string& value);
   virtual void Commit();
 
- private:
+  private:
   MDB_env* mdb_env_;
   vector<string> keys, values;
 
@@ -70,8 +99,8 @@ class LMDBTransaction : public Transaction {
 };
 
 class LMDB : public DB {
- public:
-  LMDB() : mdb_env_(NULL) { }
+  public:
+  LMDB() : mdb_env_(NULL) {}
   virtual ~LMDB() { Close(); }
   virtual void Open(const string& source, Mode mode);
   virtual void Close() {
@@ -84,7 +113,7 @@ class LMDB : public DB {
   virtual LMDBCursor* NewCursor();
   virtual LMDBTransaction* NewTransaction();
 
- private:
+  private:
   MDB_env* mdb_env_;
   MDB_dbi mdb_dbi_;
 };
@@ -92,5 +121,5 @@ class LMDB : public DB {
 }  // namespace db
 }  // namespace caffe
 
-#endif  // CAFFE_UTIL_DB_LMDB_HPP
 #endif  // USE_LMDB
+#endif  // INCLUDE_CAFFE_UTIL_DB_LMDB_HPP_
