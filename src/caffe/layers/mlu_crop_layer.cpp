@@ -73,12 +73,6 @@ void MLUCropLayer<Dtype>::Reshape_tensor(const vector<Blob<Dtype>*>& bottom,
           << "size " << bottom[1]->shape(i) << " and offset " << offsets_v_[i];
   }
   top[0]->Reshape(new_shape, cpu_dtype, mlu_dtype, CNML_TENSOR);
-  vector<int> blob_shape(bottom[0]->shape());
-  blob_shape[1] = new_shape[1];
-  //  Ni*Co*Hi*Wi
-  channel_blob_.Reshape(blob_shape, cpu_dtype, mlu_dtype, CNML_TENSOR);
-
-  isCropChannels_ = (start_axis < 2) && (bottom[0]->channels() != bottom[1]->channels());
 }
 
 
@@ -104,25 +98,13 @@ void MLUCropLayer<Dtype>::MLUDestroyOp() {
 
 template <typename Dtype>
 void MLUCropLayer<Dtype>::MLUCompileOp() {
-  if (isCropChannels_) {
-     MLU_CHECK(cnmlCompileBaseOp(crop_channels_op_ptr_, Caffe::rt_core(),
-         Caffe::model_parallel()));
-     MLU_CHECK(cnmlCompileBaseOp(crop_op_ptr_, Caffe::rt_core(),
-         Caffe::model_parallel()));
-  } else {
-     MLU_CHECK(cnmlCompileBaseOp(crop_op_ptr_, Caffe::rt_core(),
-          Caffe::model_parallel()));
-  }
+  MLU_CHECK(cnmlCompileBaseOp(crop_op_ptr_, Caffe::rt_core(),
+            Caffe::model_parallel()));
 }
 
 template <typename Dtype>
 void MLUCropLayer<Dtype>::fuse(MFusion<Dtype>* fuser) {
-  if (isCropChannels_) {
-    fuser->fuse(crop_channels_op_ptr_);
-    fuser->fuse(crop_op_ptr_);
-  } else {
-    fuser->fuse(crop_op_ptr_);
-  }
+  fuser->fuse(crop_op_ptr_);
 }
 
 template <typename Dtype>
@@ -130,64 +112,26 @@ void MLUCropLayer<Dtype>::MLUCreateOpBindData(
     const vector<Blob<Dtype>*>& bottom,
     const vector<Blob<Dtype>*>& top) {
 
-  if (isCropChannels_) {
-    // Regarding GrepChannelOp2, Co = Ci - c_front - c_back
-    // so Co = bottom[0].c - offsets_v_[1] - bottom[0].c + offsets_v_[1]  + bottom[1].c
-    //       = bottom[1].c
-    MLU_CHECK(cnmlCreateGrepChannelOp2Param(
-                &crop_channels_param_ptr_,
-                offsets_v_[1],
-                bottom[0]->channels()-offsets_v_[1]-bottom[1]->channels()));
-    MLU_CHECK(cnmlCreateGrepChannelOp(&crop_channels_op_ptr_,
-              crop_channels_param_ptr_,
-              bottom[0]->mlu_tensor(),
-              channel_blob_.mlu_tensor()));
-
-    MLU_CHECK(cnmlCreateGrepOpParam(&crop_param_ptr_,
-           offsets_v_[0],
-           offsets_v_[2],
-           offsets_v_[3],
-           0));
-    MLU_CHECK(cnmlCreateGrepOp(&crop_op_ptr_,
-            crop_param_ptr_,
-            channel_blob_.mlu_tensor(),
-            top[0]->mlu_tensor()));
-
-  } else {
-    MLU_CHECK(cnmlCreateGrepOpParam(&crop_param_ptr_,
-           offsets_v_[0],
-           offsets_v_[2],
-           offsets_v_[3],
-           0));
-    MLU_CHECK(cnmlCreateGrepOp(&crop_op_ptr_,
-            crop_param_ptr_,
-            bottom[0]->mlu_tensor(),
-            top[0]->mlu_tensor()));
-  }
+  MLU_CHECK(cnmlCreateGrepOpParam(&crop_param_ptr_,
+         offsets_v_[0],
+         offsets_v_[2],
+         offsets_v_[3],
+         offsets_v_[1]));
+  MLU_CHECK(cnmlCreateGrepOp(&crop_op_ptr_,
+          crop_param_ptr_,
+          bottom[0]->mlu_tensor(),
+          top[0]->mlu_tensor()));
 }
 
 template <typename Dtype>
 void MLUCropLayer<Dtype>::Forward_mlu(
         const vector<Blob<Dtype>*>& bottom,
         const vector<Blob<Dtype>*>& top) {
-    if (this->isCropChannels_) {
-      MLU_CHECK(cnmlComputeGrepChannelOpForward_V3(crop_channels_op_ptr_,
-             bottom[0]->mutable_mlu_data(),
-             channel_blob_.mutable_mlu_data(),
-             Caffe::forward_param(),
-             Caffe::queue()));
-      MLU_CHECK(cnmlComputeGrepOpForward_V3(crop_op_ptr_,
-             channel_blob_.mutable_mlu_data(),
-             top[0]->mutable_mlu_data(),
-             Caffe::forward_param(),
-             Caffe::queue()));
-    } else {
-      MLU_CHECK(cnmlComputeGrepOpForward_V3(crop_op_ptr_,
-             bottom[0]->mutable_mlu_data(),
-             top[0]->mutable_mlu_data(),
-             Caffe::forward_param(),
-             Caffe::queue()));
-    }
+  MLU_CHECK(cnmlComputeGrepOpForward_V3(crop_op_ptr_,
+            bottom[0]->mutable_mlu_data(),
+            top[0]->mutable_mlu_data(),
+            Caffe::forward_param(),
+            Caffe::queue()));
 }
 
 INSTANTIATE_CLASS(MLUCropLayer);
