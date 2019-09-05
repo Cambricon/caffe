@@ -47,6 +47,7 @@ class MLUCropLayer : public CropLayer<Dtype> {
   explicit MLUCropLayer(const LayerParameter& param)
       : CropLayer<Dtype>(param), crop_param_ptr_(nullptr),
       crop_op_ptr_(nullptr), offsets_v_(4, 0) {}
+
   virtual void LayerSetUp(const vector<Blob<Dtype>*>& bottom,
                           const vector<Blob<Dtype>*>& top);
   virtual ~MLUCropLayer() { MLUDestroyOp(); }
@@ -66,6 +67,7 @@ class MLUCropLayer : public CropLayer<Dtype> {
   cnmlGrepOpParam_t crop_param_ptr_;
 
   cnmlBaseOp_t crop_op_ptr_;
+  
   vector<int> offsets_v_;  //  offset of each axis, default to 0
 };
 }  // namespace caffe

@@ -85,7 +85,8 @@ cmake -DANDROID_NDK="${NDK_ROOT}" \
       ..
 
 echo "=== build =============================================================="
-make -j16
+
+make 
 
 if [ $? -ne 0 ]; then
     popd

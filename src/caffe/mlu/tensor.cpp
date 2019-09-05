@@ -266,12 +266,14 @@ void MLUTensorDesc::mluCreate() {
   }
 }
 
+
 void MLUTensorDesc::cpuDestory() {
   if (cpu_tensor_ != nullptr) {
     MLU_CHECK(cnmlDestroyCpuTensor(&cpu_tensor_));
     cpu_tensor_ = nullptr;
   }
 }
+
 
 void MLUTensorDesc::mluDestory() {
   if (mlu_tensor_ != nullptr) {

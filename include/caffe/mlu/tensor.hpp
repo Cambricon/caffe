@@ -89,8 +89,8 @@ class MLUTensorDesc {
   bool has_position_;
   float scale_;
   bool has_scale_;
-  void cpuDestory();
-  void mluDestory();
+  void cpuDestroy();
+  void mluDestroy();
   vector<int> shapeWithoutParallel();
   vector<int> positions_;
   vector<float> scales_;

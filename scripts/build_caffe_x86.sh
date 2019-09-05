@@ -11,7 +11,7 @@ cmake -DNEUWARE_HOME=${NEUWARE_HOME} \
       ..
 
 # Be nice
-make -j20
+make 
 
 if [ $? -ne 0 ]; then
     popd

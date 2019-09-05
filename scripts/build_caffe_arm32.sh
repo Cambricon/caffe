@@ -49,8 +49,8 @@ echo "=== cmake =============================================================="
 pushd $BUILD_DIR
 cmake -DCROSS_COMPILE="${TOOLCHAIN_PREFIX}" \
       -DCAMBRICOM_DRIVER_TYPE="mango_armv7" \
-      -DCMAKE_C_COMPILER="${CROSS_COMPILE}gcc" \
-      -DCMAKE_CXX_COMPILER="${CROSS_COMPILE}g++" \
+      -DCMAKE_C_COMPILER="${TOOLCHAIN_PREFIX}gcc" \
+      -DCMAKE_CXX_COMPILER="${TOOLCHAIN_PREFIX}g++" \
       -DCMAKE_CXX_FLAGS=" -fPIC -lgomp" \
       -DCMAKE_C_FLAGS=" -fPIC -lgomp" \
       -DOpenCV_MODULES_SUFFIX="" \
@@ -81,7 +81,8 @@ cmake -DCROSS_COMPILE="${TOOLCHAIN_PREFIX}" \
       ..
 
 echo "=== build =============================================================="
-make -j20
+
+make
 
 if [ $? -ne 0 ]; then
     popd

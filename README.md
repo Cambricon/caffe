@@ -1,4 +1,8 @@
 # Cambricon Caffe
+
+[![Build Status](https://travis-ci.com/Cambricon/caffe.svg?branch=master)](https://travis-ci.com/Cambricon/caffe)
+[![License](https://img.shields.io/badge/license-BSD-blue.svg)](LICENSE)
+
 To support Cambricon deep learning processor, the open source deep learning programming framework [BVLC-Caffe](https://github.com/BVLC/caffe) has been modified. New functions such as off-line multi-core inference, online fusion mode, support of multiple cards and others are developed. Cambricon Caffe focus on inference, it is dedicated to improving [BVLC-Caffe](https://github.com/BVLC/caffe) performance when running on Machine Learning Unit(MLU).
 
 ## Prerequisites
@@ -23,7 +27,7 @@ To build Cambricon Caffe, you could use **build_cambriconcaffe.sh**, which is in
 ### arm32
 Please download [cross toolchain](https://releases.linaro.org), e.g. arm-linux-gnueabihf-4.8.3-201404, and set **CROSS_TOOLCHAIN_PATH** environment to point to the tool chain downloaded:
 ```
-export CROSS_TOOLCHAIN_PATH=your_toolchain_path  // please replace your_toolchain_path with your actual path
+export CROSS_TOOLCHAIN_PATH=your_toolchain_path/bin  // please replace your_toolchain_path with your actual path
 ```
 There is another dependent library set **arm32_linux_lib**, which is necessary for the compiling of Cambricon Caffe. It has been pre-compiled and is available for downloading on Cambricon's FTP site. Please clone caffe_boost, then run **download_dependency.sh**. The script will help download it.
 
@@ -47,9 +51,10 @@ Once you have set up above two environment variables, you are ready to compile C
 ```
 
 ### arm64
-For arm64, please download **android-ndk-r17b** firstly, it can be downloaded from [NDK's](https://developer.android.google.cn/ndk) official website. Then set **ARM64_R17_NDK_ROOT** environment for it:
+For arm64, please download **android-ndk-r17b** firstly, it can be downloaded from [NDK's](https://developer.android.google.cn/ndk) official website. Then place it in **/opt/shared/Android/Ndk/** directory(if not exists, please create one) and set **ARM64_R17_NDK_ROOT** environment as follows:
 ```
-export ARM64_R17_NDK_ROOT=your_ndk_path  // please replace your_ndk_path with your actual path
+export ARM64_R17_NDK_ROOT=/opt/shared/Android/Ndk/android-ndk-r17b
+
 ```
 There is another dependent library set **android_lib_r17b**. It also has been pre-compiled and is available for downloading on Cambricon's FTP site. Please input parameter **2** for download_dependency.sh.
 ```

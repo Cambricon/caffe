@@ -111,7 +111,6 @@ template <typename Dtype>
 void MLUCropLayer<Dtype>::MLUCreateOpBindData(
     const vector<Blob<Dtype>*>& bottom,
     const vector<Blob<Dtype>*>& top) {
-
   MLU_CHECK(cnmlCreateGrepOpParam(&crop_param_ptr_,
          offsets_v_[0],
          offsets_v_[2],
