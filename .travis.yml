@@ -12,16 +12,19 @@ env:
 cache:
   apt: true
   directories:
-  - "~/protobuf3"
+  - ~/protobuf3
 before_install:
 - source ./scripts/travis/defaults.sh
 install:
 before_script:
     #- "./scripts/travis/configure.sh"
 - sudo apt-get install sshpass
+
+- chmod +x ./scripts/travis/build.sh
+- chmod +x ./scripts/travis/test.sh
 script:
-- "./scripts/travis/build.sh"
-- "./scripts/travis/test.sh"
+- ./scripts/travis/build.sh
+- ./scripts/travis/test.sh
 notifications:
   email:
     on_success: always
