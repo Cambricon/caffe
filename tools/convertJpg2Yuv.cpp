@@ -40,7 +40,7 @@ void readYUV(string name, cv::Mat img, int h, int w) {
 }
 
 cv::Mat yuv420sp2Bgr24(cv::Mat yuv_image) {
-  cv::Mat bgr_image(yuv_image.rows / 3 * 2, yuv_image.cols, CV_8UC3);
+  cv::Mat bgr_image;
   cvtColor(yuv_image, bgr_image, CV_YUV420sp2BGR);
   return bgr_image;
 }
