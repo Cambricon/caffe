@@ -267,7 +267,7 @@ void MLUTensorDesc::mluCreate() {
 }
 
 
-void MLUTensorDesc::cpuDestory() {
+void MLUTensorDesc::cpuDestroy() {
   if (cpu_tensor_ != nullptr) {
     MLU_CHECK(cnmlDestroyCpuTensor(&cpu_tensor_));
     cpu_tensor_ = nullptr;
@@ -275,7 +275,7 @@ void MLUTensorDesc::cpuDestory() {
 }
 
 
-void MLUTensorDesc::mluDestory() {
+void MLUTensorDesc::mluDestroy() {
   if (mlu_tensor_ != nullptr) {
     MLU_CHECK(cnmlDestroyTensor(&mlu_tensor_));
     mlu_tensor_ = nullptr;
@@ -319,8 +319,8 @@ void MLUTensorDesc::set_scales(const vector<float>& scales) {
 }
 
 MLUTensorDesc::~MLUTensorDesc() {
-  cpuDestory();
-  mluDestory();
+  cpuDestroy();
+  mluDestroy();
 }
 
 }  // namespace caffe
