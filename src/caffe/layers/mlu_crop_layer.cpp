@@ -78,14 +78,6 @@ void MLUCropLayer<Dtype>::Reshape_tensor(const vector<Blob<Dtype>*>& bottom,
 
 template <typename Dtype>
 void MLUCropLayer<Dtype>::MLUDestroyOp() {
-  if (crop_channels_param_ptr_ != nullptr) {
-    MLU_CHECK(cnmlDestroyGrepChannelOpParam(&crop_channels_param_ptr_));
-    crop_channels_param_ptr_ = nullptr;
-  }
-  if (crop_channels_op_ptr_ != nullptr) {
-    MLU_CHECK(cnmlDestroyBaseOp(&crop_channels_op_ptr_));
-    crop_channels_op_ptr_ = nullptr;
-  }
   if (crop_param_ptr_ != nullptr) {
     MLU_CHECK(cnmlDestroyGrepOpParam(&crop_param_ptr_));
     crop_param_ptr_ = nullptr;
