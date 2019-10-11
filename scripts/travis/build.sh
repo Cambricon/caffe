@@ -12,7 +12,6 @@
 #fi
 #make lint
 
-sshpass -p $SECRET_KEY ssh -o StrictHostKeyChecking=no -p $SECRET_PORT cambricon@$SECRET_IP '
-  cd travis-ci 
-  ./build.sh
-'
+echo `pwd`
+echo "===========build start================"
+./scripts/build_cambriconcaffe.sh -c 

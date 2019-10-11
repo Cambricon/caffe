@@ -1,14 +1,31 @@
-dist: trusty
+dist: xenial
 sudo: required
 language: cpp
 compiler: gcc
 env:
   global:
-  - NUM_THREADS=6
-  - BUILD_NAME="default-make" WITH_CMAKE=true
-  - secure: ZNFQwAiY4pAWSxMY21Y15QUajtLbS3IsjP+kPV/EtXGAu5CvnpLWk1jCXDdXq5/EQ7sajg13f2WweBrZXP1pPNF68+Cbcjt/JrGdeQCL6GgNdtSORMuC7+kPrGN9Ip9C3+elKbsXZC5fJQf5xGcWVUV6Zf63VfkfF1MUUFCqHlIZ9jw6KznRMzdaU9xjHo1fnFGq7qqefOj6Wfzr8NYv4sZo8uPIEEfsfJO28IQ3TEdu0T4ub1Ui5v5zjgtRIQx5V4ADFmdeHgSDqVaM7nJnKdXli9J+3EDNcuRWL5F+OaW0OLS6m9YhKUVD0SkRzsa7N5wSipQ53dLBHTJpJ7iJejAAHXotP91cXwW4AhP2LAFwHzgkxsfSYhUx6V7lZc/Sg6yB4+QDEDBOr2LMTzK8EduVGh4coMuY8qKyW1pP7HFXIfeBX1onff0g2b3JYQYVGckxvKy0xZs5+XO90Z+9sY7GTwLQgPmVnwAaiJ7aHtATa2t6eZ1osR2NHAj07IBCZW+X8A32fczwKfvOkuEoyLItPvxMV/s/4ixZB2ZRXs7RqN265HRVAbts99zRaCMuw1ZrQOgEeUvRJkKzGXFb9A4M1LiSH45LI7OzQzhSYSFBh1Rxzoy/gaAfuwqbSvLY3dxL4Jy1dIxYnLTOfByNAdmJqIUfSXtmT46gZ26GR/g=
-  - secure: kDWtRO25gFkLcAdLkny8C5soBgOLsykZld12ABhftcoMy0b1dfqvGSmD4I/N8fipx+HSlaFCcZSQMFjc7zhfv0321gAoLxICzL+hncs8E8q+duErMRfOL09NH4Q71YaZiUeEV50T8CDfwBJITc7dHrhrLZUNRhKKfhdFsgwixbq/Y5XnrCwR9Z+xH7orNwYF7HPn9GNsDNknaMbcDWp7OxTTJyLPz7moc9DFV2oaB91VsHiVQmsARncfjtRpKz33SldgYNnq2TfhdxL1mVzjdZ++OvjJorN8+pQiij3aEAgHaoBPUT6KAsiZSgJS7w6C6mQRp5crRGHYSwuGprJbR76ZtgB/r26CTdfpnYd47ecz2EdkzgNxZO+d48+u0r7NbZe9FC+1zCpfhVjgjB5g0/t5QpbaYcE3SuWcALqv/lP5JWvXFLsBg+QLham6KEveTGizpYtKShs+Mh4l5MVprQZ3EGqv6w/b3Zv9mhMaPsCj6a3D345tT6puf8DkTQYQ+6Kn3Bw4IYgswU0k+5+7KGpFyOSa0+mlbBj+D4O+n96vZx42o5v6UZnL2CB//mcYrEAy71/ua2bsTZPimm4wT3pSKZZGEScgHc2O++L4jZ3lJdKBJLo/Nzu2DPZGvQhOmZR+toX7uXGWlW6hr8AzDHUuYhsdHXBU2X3Yfk7DQo4=
-  - secure: lHCLXgJZGmvMZE1bXYX4Elgd6wegPBwnCfsc1QAZ3PbSS7t/4fzBbPziF71rl9V/RMAIqPKWojhg8ePy+Pyb+N3D0P8bzSIwBxtIioF5lD/ZCWTdyuVT9aURzvj49Hwd5qLvlWfEuiuFcCIy05jqdtVIIM0CHsHy9hTVjqbMWBM8kXHcbs0JIXMBHZfCJXv3yUSlxB889KQhm5D38wtC8V5OyZumMzVLgz5pHp2tn6xRBXFMR1HF9pshVTHfmYc/5bNV/ufGnrKT6WLZlxRaZi+6oFqCz8vdDO0BAUp/mkfH5uvTANDAmhR32kD30rXCtGWsy9S8OvduPb2KoEzk0f5o2DT9S8xDf+9Te9QC/6e5CFb54RtaQ85QxFVSq2US9W3cz26bkI9RpPlOOkyNpxJNVb3rRKFDGHKolOZqo00a4qPtQn15qq/rgWXndskirvEhVRhSujOnzDK3Wlp5LiBWBM0YU8pP6+Vh+jnZuDlj4f7UACeAgCwUokhaCi0IC4saQvqjZEqxuR7S/Q6yrG1aYkwBxIYX8TVGPcSiIzg+cFX41G9J2VF6liS3c/FBEqdcOcyzz2UuL4fYsVYuY9BjDiHkr+6HDQlKxaEdXysXtfszDVuFZMDJJmWD4PEG0yszpFqhyiIzRpbLlbmtW1xKP5lqKQnev4LRAKO4tHc=
+
+    - NUM_THREADS=4
+  matrix:
+    # Use a build matrix to test many builds in parallel
+    # envvar defaults:
+    #   WITH_CMAKE: false
+    #   WITH_PYTHON3: false
+    #   WITH_IO: true
+    #   WITH_CUDA: false
+    #   WITH_CUDNN: false
+    #- BUILD_NAME="default-make"
+#   - BUILD_NAME="python3-make" WITH_PYTHON3=true
+#    - BUILD_NAME="no-io-make" WITH_IO=false
+#    - BUILD_NAME="cuda-make" WITH_CUDA=false
+#    - BUILD_NAME="cudnn-make" WITH_CUDA=true WITH_CUDNN=true
+
+    - BUILD_NAME="default-cmake" WITH_CMAKE=true
+#    - BUILD_NAME="python3-cmake" WITH_CMAKE=true WITH_PYTHON3=true
+#    - BUILD_NAME="no-io-cmake" WITH_CMAKE=true WITH_IO=false
+#    - BUILD_NAME="cuda-cmake" WITH_CMAKE=true WITH_CUDA=true
+#    - BUILD_NAME="cudnn-cmake" WITH_CMAKE=true WITH_CUDA=true WITH_CUDNN=true
+
 cache:
   apt: true
   directories:
@@ -16,9 +33,15 @@ cache:
 before_install:
 - source ./scripts/travis/defaults.sh
 install:
+
+  - sudo -E ./scripts/travis/install-deps.sh
+#  - ./scripts/travis/setup-venv.sh ~/venv
+#  - source ~/venv/bin/activate
+#  - ./scripts/travis/install-python-deps.sh
+
 before_script:
-    #- "./scripts/travis/configure.sh"
-- sudo apt-get install sshpass
+#  - ./scripts/travis/configure.sh
+
 
 - chmod +x ./scripts/travis/build.sh
 - chmod +x ./scripts/travis/test.sh

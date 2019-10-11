@@ -3,7 +3,7 @@
 
 #BASEDIR=$(dirname $0)
 #source $BASEDIR/defaults.sh
-#
+
 #if $WITH_CUDA ; then
 #  echo "Skipping tests for CUDA build"
 #  exit 0
@@ -17,8 +17,9 @@
 #  make runtest
 #  make pytest
 #fi
-sshpass -p $SECRET_KEY ssh -o StrictHostKeyChecking=no -p $SECRET_PORT cambricon@$SECRET_IP '
-  cd travis-ci 
-  echo `pwd`
-  ./test.sh
-'
+
+echo `pwd`
+echo "===============test start====================="
+cd build 
+#do nothing
+#make testlist
