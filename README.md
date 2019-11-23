@@ -3,7 +3,7 @@
 [![Build Status](https://travis-ci.com/Cambricon/caffe.svg?branch=master)](https://travis-ci.com/Cambricon/caffe)
 [![License](https://img.shields.io/badge/license-BSD-blue.svg)](LICENSE)
 
-To support Cambricon deep learning processor, the open source deep learning programming framework [BVLC-Caffe](https://github.com/BVLC/caffe) has been modified. New functions such as off-line multi-core inference, online fusion mode, support of multiple cards and others are developed. Cambricon Caffe focus on inference, it is dedicated to improving [BVLC-Caffe](https://github.com/BVLC/caffe) performance when running on Machine Learning Unit(MLU).
+To support Cambricon deep learning processor, the open source deep learning programming framework [BVLC-Caffe](https://github.com/BVLC/caffe) has been modified. New functions such as off-line multi-core inference, online fusion mode, support of multiple cards and others are developed. Cambricon Caffe focuses on inference, it is dedicated to improving [BVLC-Caffe](https://github.com/BVLC/caffe) performance when running on Machine Learning Unit(MLU).
 
 ## Prerequisites
 Cambricon Caffe has several dependencies as same as [BVLC-Caffe](https://github.com/BVLC/caffe) does, please refer to [caffe.berkeleyvision.org](https://caffe.berkeleyvision.org/installation.html) for details.
