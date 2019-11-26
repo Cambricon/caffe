@@ -11,7 +11,7 @@
 #  make --jobs $NUM_THREADS all test.testbin
 #fi
 #make lint
- 
+
 echo `pwd`
 echo "===========build start================"
 ./scripts/build_cambriconcaffe.sh -c 

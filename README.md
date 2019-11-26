@@ -54,6 +54,7 @@ Once you have set up above two environment variables, you are ready to compile C
 For arm64, please download **android-ndk-r17b** firstly, it can be downloaded from [NDK's](https://developer.android.google.cn/ndk) official website. Then place it in **/opt/shared/Android/Ndk/** directory(if not exists, please create one) and set **ARM64_R17_NDK_ROOT** environment as follows:
 ```
 export ARM64_R17_NDK_ROOT=/opt/shared/Android/Ndk/android-ndk-r17b
+
 ```
 There is another dependent library set **android_lib_r17b**. It also has been pre-compiled and is available for downloading on Cambricon's FTP site. Please input parameter **2** for download_dependency.sh.
 ```

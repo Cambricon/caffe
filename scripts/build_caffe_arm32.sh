@@ -81,6 +81,7 @@ cmake -DCROSS_COMPILE="${TOOLCHAIN_PREFIX}" \
       ..
 
 echo "=== build =============================================================="
+
 make
 
 if [ $? -ne 0 ]; then

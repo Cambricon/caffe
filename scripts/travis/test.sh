@@ -17,6 +17,7 @@
 #  make runtest
 #  make pytest
 #fi
+
 echo `pwd`
 echo "===============test start====================="
 cd build 

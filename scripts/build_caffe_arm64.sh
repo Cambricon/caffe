@@ -85,6 +85,7 @@ cmake -DANDROID_NDK="${NDK_ROOT}" \
       ..
 
 echo "=== build =============================================================="
+
 make 
 
 if [ $? -ne 0 ]; then
