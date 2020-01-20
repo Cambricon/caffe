@@ -3,7 +3,7 @@ To support Cambricon deep learning processor, the open source deep learning prog
 
 
 ## Cambricon Caffe Version
-Cambricon Caffe supports several Cambricon Machine Learning Unit, please see below for more details.
+Cambricon Caffe supports several Cambricon Machine Learning Unit, please see below for more details. 
 
 * **For serials of MLU100:**
 
