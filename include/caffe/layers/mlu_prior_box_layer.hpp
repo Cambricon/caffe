@@ -2,7 +2,7 @@
 All modification made by Cambricon Corporation: © 2018--2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -29,20 +29,19 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #ifndef INCLUDE_CAFFE_LAYERS_MLU_PRIOR_BOX_LAYER_HPP_
 #define INCLUDE_CAFFE_LAYERS_MLU_PRIOR_BOX_LAYER_HPP_
-
 #ifdef USE_MLU
 
 #include <vector>
-
 #include "caffe/blob.hpp"
 #include "caffe/layer.hpp"
 #include "caffe/proto/caffe.pb.h"
-
 #include "caffe/layers/prior_box_layer.hpp"
 
 namespace caffe {
+
 /**
  * @brief MLU acceleration of PriorBoxLayer.
+ *
  * Generate priorboxes on top of given feature maps.
  * priorbox center located acorrding with the input
  * feature map's (width, height), On each center, you
@@ -75,6 +74,5 @@ class MLUPriorBoxLayer : public PriorBoxLayer<Dtype> {
   cnmlBaseOp_t device_copy_op_ptr_;
 };
 }  // namespace caffe
-
 #endif  // USE_MLU
 #endif  // INCLUDE_CAFFE_LAYERS_MLU_PRIOR_BOX_LAYER_HPP_

@@ -1,3 +1,31 @@
+/*
+All modification made by Cambricon Corporation: © 2018--2019 Cambricon Corporation
+All rights reserved.
+All other contributions:
+Copyright (c) 2014--2019, the respective contributors
+All rights reserved.
+For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+    * Redistributions of source code must retain the above copyright notice,
+      this list of conditions and the following disclaimer.
+    * Redistributions in binary form must reproduce the above copyright
+      notice, this list of conditions and the following disclaimer in the
+      documentation and/or other materials provided with the distribution.
+    * Neither the name of Intel Corporation nor the names of its contributors
+      may be used to endorse or promote products derived from this software
+      without specific prior written permission.
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+*/
 #include <opencv2/core/core.hpp>
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/highgui/highgui_c.h>
@@ -72,19 +100,16 @@ void jpg2yuv(string image_path) {
     srcImg = src;
   }
 
-  LOG(INFO) << "srcImg";
-  LOG(INFO) << "height: " << srcImg.rows;
-  LOG(INFO) << "width: " << srcImg.cols;
-
-  int yuv_height = srcImg.rows * 3 / 2;
-  cv::Mat yuv_image(yuv_height, srcImg.rows, CV_8UC1);
+  cv::Mat yuv_image;
   cvtColor(srcImg, yuv_image, CV_BGR2YUV_I420);
 
-  LOG(INFO) << "yuvImg";
-  LOG(INFO) << "height: " << yuv_image.rows;
-  LOG(INFO) << "width: " << yuv_image.cols;
+  LOG(INFO) << "srcImg -> height " << srcImg.rows
+            << ", width: " << srcImg.cols;
+  LOG(INFO) << "yuvImg -> height: " << yuv_image.rows
+            << ", width: " << yuv_image.cols;
 
   // yuvdata
+  int yuv_height = srcImg.rows * 3 / 2;
   char* yuvdata = new char[yuv_height*srcImg.cols];
   int index = 0;
   for (int i = 0; i < yuv_height; i++) {
@@ -97,20 +122,15 @@ void jpg2yuv(string image_path) {
   // YUV_I420 -> yuv420sp
   int width = srcImg.cols;
   int height = srcImg.rows;
-  LOG(INFO) << "width: " << width << "," << "height: " << height;
   int frameSize = width * height;
   int qFrameSize = frameSize / 4;
   int tempFrameSize = frameSize * 5 / 4;
   char* output = new char[frameSize * 3 / 2];
-  LOG(INFO) << "size: " << frameSize << ", " <<
-    qFrameSize << ", " << tempFrameSize;
   memcpy(output, yuvdata, frameSize);
   for (int i = 0; i < qFrameSize; i++) {
     output[frameSize + i * 2] = yuvdata[tempFrameSize + i];
     output[frameSize + i * 2 + 1] = yuvdata[frameSize + i];
   }
-  delete[] yuvdata;
-  delete[] output;
 
   stringstream ss;
   string file_name;
@@ -126,6 +146,8 @@ void jpg2yuv(string image_path) {
   }
   fout.close();
   LOG(INFO) << "JPG had been converted to yuv data: " << file_name;
+  delete[] yuvdata;
+  delete[] output;
 
   // yuv2jpg
   cv::Mat yuv = convertYuv2Mat(file_name, yuv_image.cols, yuv_image.rows);
@@ -139,7 +161,8 @@ void yuv2jpg(string yuv_path) {
   if (FLAGS_width == 0 || FLAGS_height == 0) {
     LOG(ERROR) << "width = 0, or height = 0";
   }
-  cv::Mat yuv = convertYuv2Mat(yuv_path, FLAGS_width, FLAGS_height);
+  int height = FLAGS_height / 2 * 3;
+  cv::Mat yuv = convertYuv2Mat(yuv_path, FLAGS_width, height);
   cv::Mat image = yuv420sp2Bgr24(yuv);
   stringstream ss;
   string file_name;
@@ -150,7 +173,6 @@ void yuv2jpg(string yuv_path) {
   cv::imwrite(file_name, image);
   LOG(INFO) << "yuvData had been converted to JPG: " << file_name;
 }
-
 
 int main(int argc, char** argv) {
 #ifdef USE_OPENCV

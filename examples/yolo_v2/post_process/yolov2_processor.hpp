@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -74,7 +74,8 @@ class YoloV2Processor : public PostProcessor<Dtype, Qtype> {
                          float h);
   void class_index_and_score(float* input,
                              int classes,
-                             PredictionResult* predict);
+                             float confidence_threshold_,
+                             map<int, float> *prob_index);
   void get_region_box(float* x,
                       PredictionResult* predict,
                       vector<float> biases,
@@ -86,7 +87,10 @@ class YoloV2Processor : public PostProcessor<Dtype, Qtype> {
                       int h);
   void ApplyNms(vector<PredictionResult>* boxes,
                 vector<int>* idxes,
-                float threshold);
+                float threshold,
+                vector< vector<float> >* result,
+                int b,
+                int num_classes_);
   vector<vector<float> > detection_out(float* net_output,
                                        int out_n,
                                        int out_c,
@@ -94,11 +98,13 @@ class YoloV2Processor : public PostProcessor<Dtype, Qtype> {
                                        int out_w);
   void get_point_position(const vector<float> pos,
                         cv::Point* p1, cv::Point* p2, int h, int w);
-
+  void correct_region_boxes(vector<vector<float>>* boxes,
+                        const cv::Mat image);
   void WriteVisualizeBBox_offline(const vector<cv::Mat>& images,
                    const vector<vector<float>>& detections,
                    const vector<string>& labels_,
-                   const vector<string>& img_names);
+                   const vector<string>& img_names,
+                   const int from, const int to);
   void WriteVisualizeBBox_online(const vector<cv::Mat>& images,
                    const vector<vector<vector<float>>> detections,
                    const vector<string>& labelToDisplayName,

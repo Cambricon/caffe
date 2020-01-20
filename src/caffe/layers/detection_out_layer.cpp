@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -63,7 +63,7 @@ void DetectionOutLayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& bottom,
   if (detection_out_param.has_label_map_file()) {
     string label_map_file = detection_out_param.label_map_file();
     if (label_map_file.empty()) {
-      LOG(WARNING) << "Provide label_map_file if output results to files.";
+      LOG(WARNING) << "Provide label_map_file if out results to files.";
     } else {
       LabelMap label_map;
       CHECK(ReadProtoFromTextFile(label_map_file, &label_map))
@@ -102,7 +102,7 @@ void DetectionOutLayer<Dtype>::Forward_cpu(
   vector< PredictionResult<Dtype> > predicts;
   PredictionResult<Dtype> predict;
   predicts.clear();
-  vector<float> results;
+  vector<vector<float>> results;
   map<int, int> valid_index;
   for (int b = 0; b < swap.num(); ++b) {
     for (int j = 0; j < side_; ++j)
@@ -115,48 +115,49 @@ void DetectionOutLayer<Dtype>::Forward_cpu(
           get_region_box(swap_data, &predict, biases_,
                          n, index, i, j, side_, side_);
           predict.objScore = sigmoid(swap_data[index + 4]);
-          class_index_and_score(swap_data + index + 5, num_classes_, &predict);
-          predict.confidence = predict.objScore * predict.classScore;
-          if (predict.confidence >= confidence_threshold_) {
-            predicts.push_back(predict);
+          map<int, float> prob_index;
+          class_index_and_score(swap_data + index + 5,
+                                num_classes_, confidence_threshold_, &prob_index);
+          for (int k = 0; k < num_classes_; k++) {
+            predict.confidence = predict.objScore * prob_index[k];
+            if (predict.confidence > confidence_threshold_) {
+              predict.classType = k;
+              predicts.push_back(predict);
+            }
           }
         }
 
     vector<int> idxes;
     int num_kept = 0;
     if (predicts.size() > 0) {
-      ApplyNms(&predicts, &idxes, nms_threshold_);
-      num_kept = idxes.size();
+      ApplyNms(&predicts, &idxes, nms_threshold_, &results, b, num_classes_);
     }
-
+    num_kept = results.size();
     vector<int> top_shape{1, 1, num_kept, 7};
     if (num_kept == 0) {
-      LOG(INFO) << "Couldn't find any detections, Generate fake results for image";
+      LOG(INFO) << "Couldn't find any detections, Generate fake results per image";
       top_shape[2] = swap.num();
       top[0]->Reshape(top_shape);
       Dtype* top_data = top[0]->mutable_cpu_data();
       caffe_set<Dtype>(top[0]->count(), -1, top_data);
-      // Generate fake results for image.
+      // Generate fake results per image.
       for (int i = 0; i < num; ++i) {
         top_data[0] = i;
         top_data += 7;
       }
-    } else {
-      for (int i = 0; i < num_kept; i++)
-        valid_index.insert({idxes[i], b});
     }
   }
-  vector<int> top_shape{1, 1, static_cast<int>(valid_index.size()), 7};
+  vector<int> top_shape{1, static_cast<int>(results.size()), 1, 7};
   top[0]->Reshape(top_shape);
   Dtype* top_data = top[0]->mutable_cpu_data();
-  for (auto it = valid_index.begin(); it != valid_index.end(); it++) {
-    *top_data++ = it->second;  //  Image_Id
-    *top_data++ = predicts[it->first].classType;  //  label
-    *top_data++ = predicts[it->first].confidence;  //  confidence
-    *top_data++ = predicts[it->first].x;
-    *top_data++ = predicts[it->first].y;
-    *top_data++ = predicts[it->first].w;
-    *top_data++ = predicts[it->first].h;
+  for (int i = 0; i < results.size(); i++) {
+    *top_data++ = results[i][0];  //  Image_Id
+    *top_data++ = results[i][1];  //  label
+    *top_data++ = results[i][2];  //  confidence
+    *top_data++ = results[i][3];
+    *top_data++ = results[i][4];
+    *top_data++ = results[i][5];
+    *top_data++ = results[i][6];
   }
 }
 

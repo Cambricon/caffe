@@ -1,9 +1,9 @@
 #-*- coding: utf-8 -*-
 """
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -151,7 +151,7 @@ def main(argv):
         caffe.set_mode_cpu()
         print("CPU mode")
 
-    caffe.set_rt_core("MLU100");  # FIXME change to your core version
+    caffe.set_rt_core("MLU270");  # FIXME change to your core version
 
     # Make classifier.
     classifier = caffe.Classifier(args.model_def, args.pretrained_model,

@@ -2,7 +2,7 @@
 All modification made by Cambricon Corporation: © 2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -29,7 +29,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #ifdef USE_MLU
 #include <vector>
-
 #include "caffe/layers/mlu_threshold_layer.hpp"
 
 namespace caffe {
@@ -44,7 +43,7 @@ template <typename Dtype>
 void MLUThresholdLayer<Dtype>::Reshape_tensor(const vector<Blob<Dtype>*>& bottom,
                                               const vector<Blob<Dtype>*>& top) {
   BaseDataType cpu_dtype = sizeof(Dtype) == 4 ? DT_FLOAT32 : DT_DOUBLE;
-  BaseDataType mlu_dtype = DT_FLOAT16;
+  BaseDataType mlu_dtype = bottom[0]->mlu_type();
 
   top[0]->Reshape(bottom[0]->shape(), cpu_dtype, mlu_dtype, CNML_TENSOR);
 }
@@ -52,28 +51,28 @@ void MLUThresholdLayer<Dtype>::Reshape_tensor(const vector<Blob<Dtype>*>& bottom
 template <typename Dtype>
 void MLUThresholdLayer<Dtype>::MLUCreateOpBindData(const vector<Blob<Dtype>*>& bottom,
                                                    const vector<Blob<Dtype>*>& top) {
-    /*create Threshold Op to realize threshold layer function*/
-    MLU_CHECK(cnmlCreateThrsOp(&threshold_op_ptr_,
-                                this->threshold_,
-                                bottom[0]->mlu_tensor(),
-                                top[0]->mlu_tensor()));
+  /*create Threshold Op to realize threshold layer function*/
+  MLU_CHECK(cnmlCreateThrsOp(&threshold_op_ptr_,
+                              this->threshold_,
+                              bottom[0]->mlu_tensor(),
+                              top[0]->mlu_tensor()));
 }
 
 template <typename Dtype>
 void MLUThresholdLayer<Dtype>::MLUCompileOp() {
     MLU_CHECK(cnmlCompileBaseOp(threshold_op_ptr_,
                                 Caffe::rt_core(),
-                                Caffe::model_parallel()));
+                                Caffe::core_number()));
 }
 
 template <typename Dtype>
 void MLUThresholdLayer<Dtype>::Forward_mlu(const vector<Blob<Dtype>*>& bottom,
     const vector<Blob<Dtype>*>& top) {
     MLU_CHECK(cnmlComputeThrsOpForward_V3(threshold_op_ptr_,
-                                bottom[0]->mutable_mlu_data(),
-                                top[0]->mutable_mlu_data(),
-                                Caffe::forward_param(),
-                                Caffe::queue()));
+                                          bottom[0]->mutable_mlu_data(),
+                                          top[0]->mutable_mlu_data(),
+                                          Caffe::forward_param(),
+                                          Caffe::queue()));
 }
 
 template <typename Dtype>
@@ -92,4 +91,4 @@ void MLUThresholdLayer<Dtype>::MLUDestroyOp() {
 INSTANTIATE_CLASS(MLUThresholdLayer);
 
 }  // namespace caffe
-#endif
+#endif  // USE_MLU

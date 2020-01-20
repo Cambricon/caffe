@@ -2,7 +2,7 @@
 All modification made by Cambricon Corporation: © 2018--2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -28,13 +28,11 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
 #ifdef USE_MLU
-
 #include <algorithm>
 #include <memory>
 #include <sstream>
 #include <string>
 #include <vector>
-
 #include "caffe/filler.hpp"
 #include "caffe/layers/mlu_crop_layer.hpp"
 #include "caffe/mlu/fusion.hpp"
@@ -52,7 +50,7 @@ template <typename Dtype>
 void MLUCropLayer<Dtype>::Reshape_tensor(const vector<Blob<Dtype>*>& bottom,
                            const vector<Blob<Dtype>*>& top) {
   BaseDataType cpu_dtype = sizeof(Dtype) == 4 ? DT_FLOAT32 : DT_DOUBLE;
-  BaseDataType mlu_dtype = DT_FLOAT16;
+  BaseDataType mlu_dtype = bottom[0]->mlu_type();
 
   const CropParameter& param = this->layer_param_.crop_param();
   const int start_axis = bottom[0]->CanonicalAxisIndex(param.axis());
@@ -106,12 +104,12 @@ template <typename Dtype>
 void MLUCropLayer<Dtype>::MLUCompileOp() {
   if (isCropChannels_) {
      MLU_CHECK(cnmlCompileBaseOp(crop_channels_op_ptr_, Caffe::rt_core(),
-         Caffe::model_parallel()));
+         Caffe::core_number()));
      MLU_CHECK(cnmlCompileBaseOp(crop_op_ptr_, Caffe::rt_core(),
-         Caffe::model_parallel()));
+         Caffe::core_number()));
   } else {
      MLU_CHECK(cnmlCompileBaseOp(crop_op_ptr_, Caffe::rt_core(),
-          Caffe::model_parallel()));
+          Caffe::core_number()));
   }
 }
 
@@ -126,15 +124,13 @@ void MLUCropLayer<Dtype>::fuse(MFusion<Dtype>* fuser) {
 }
 
 template <typename Dtype>
-void MLUCropLayer<Dtype>::MLUCreateOpBindData(
-    const vector<Blob<Dtype>*>& bottom,
-    const vector<Blob<Dtype>*>& top) {
-
+void MLUCropLayer<Dtype>::MLUCreateOpBindData(const vector<Blob<Dtype>*>& bottom,
+                                              const vector<Blob<Dtype>*>& top) {
   if (isCropChannels_) {
     // Regarding GrepChannelOp2, Co = Ci - c_front - c_back
     // so Co = bottom[0].c - offsets_v_[1] - bottom[0].c + offsets_v_[1]  + bottom[1].c
     //       = bottom[1].c
-    MLU_CHECK(cnmlCreateGrepChannelOp2Param(
+    MLU_CHECK(cnmlCreateGrepChannelOpParam_V2(
                 &crop_channels_param_ptr_,
                 offsets_v_[1],
                 bottom[0]->channels()-offsets_v_[1]-bottom[1]->channels()));
@@ -142,7 +138,6 @@ void MLUCropLayer<Dtype>::MLUCreateOpBindData(
               crop_channels_param_ptr_,
               bottom[0]->mlu_tensor(),
               channel_blob_.mlu_tensor()));
-
     MLU_CHECK(cnmlCreateGrepOpParam(&crop_param_ptr_,
            offsets_v_[0],
            offsets_v_[2],
@@ -152,7 +147,6 @@ void MLUCropLayer<Dtype>::MLUCreateOpBindData(
             crop_param_ptr_,
             channel_blob_.mlu_tensor(),
             top[0]->mlu_tensor()));
-
   } else {
     MLU_CHECK(cnmlCreateGrepOpParam(&crop_param_ptr_,
            offsets_v_[0],
@@ -167,9 +161,8 @@ void MLUCropLayer<Dtype>::MLUCreateOpBindData(
 }
 
 template <typename Dtype>
-void MLUCropLayer<Dtype>::Forward_mlu(
-        const vector<Blob<Dtype>*>& bottom,
-        const vector<Blob<Dtype>*>& top) {
+void MLUCropLayer<Dtype>::Forward_mlu(const vector<Blob<Dtype>*>& bottom,
+                                      const vector<Blob<Dtype>*>& top) {
     if (this->isCropChannels_) {
       MLU_CHECK(cnmlComputeGrepChannelOpForward_V3(crop_channels_op_ptr_,
              bottom[0]->mutable_mlu_data(),

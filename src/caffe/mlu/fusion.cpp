@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -72,7 +72,10 @@ void MFusion<Dtype>::compile() {
 
   setFusionIO();
   LOG(INFO) << "[Fusion] compiling..." << fuse_op_;
-  MLU_CHECK(cnmlCompileFusionOp(fuse_op_, Caffe::rt_core(), Caffe::model_parallel()));
+  MLU_CHECK(cnmlSetFusionOpCorenum(fuse_op_, Caffe::core_number()));
+  LOG(INFO) << "Core Number is " << Caffe::core_number();
+  MLU_CHECK(cnmlSetFusionOpCoreVersion(fuse_op_, Caffe::rt_core()));
+  MLU_CHECK(cnmlCompileFusionOp_V2(fuse_op_));
   compiled_ = true;
 }
 
@@ -286,11 +289,23 @@ void MFusion<Dtype>::forward() {
   blob2Memory();
   event_time_ = 0;
   LOG(INFO) << "[Fusion] forwarding...";
+  cnrtNotifier_t notifierBeginning, notifierEnd;
+  cnrtCreateNotifier(&notifierBeginning);
+  cnrtCreateNotifier(&notifierEnd);
+
+  cnrtPlaceNotifier(notifierBeginning, Caffe::queue());
   MLU_CHECK(cnmlComputeFusionOpForward_V3(fuse_op_,
                                       input_mem_.data(), input_mem_.size(),
                                       output_mem_.data(), output_mem_.size(),
                                       Caffe::forward_param(), Caffe::queue()));
+  cnrtPlaceNotifier(notifierEnd, Caffe::queue());
   CNRT_CHECK(cnrtSyncQueue(Caffe::queue()));
+  cnrtNotifierDuration(notifierBeginning, notifierEnd, &event_time_);
+  LOG(INFO) << "Hardware execution time: "<< event_time_
+    << "(" << event_time_ /1000 << "ms)";
+
+  cnrtDestroyNotifier(&notifierBeginning);
+  cnrtDestroyNotifier(&notifierEnd);
 }
 
 template <typename Dtype>

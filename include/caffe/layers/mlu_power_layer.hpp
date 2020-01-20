@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -36,6 +36,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "caffe/layers/power_layer.hpp"
 #include "caffe/proto/caffe.pb.h"
 namespace caffe {
+
 /**
  * @brief Computes @f$ y = (\alpha x + \beta) ^ \gamma @f$,
  *        as specified by the scale @f$ \alpha @f$, shift @f$ \beta @f$ and
@@ -43,14 +44,14 @@ namespace caffe {
  */
 template <typename Dtype>
 class MLUPowerLayer:public PowerLayer<Dtype>{
- public:
-/**
- * @param param provides PowerParameter power_param,
- *        with PowerLayer options:
- *      - scale (\b optional, default 1.0) the scale @f$ \alpha @f$
- *      - shift (\b optional, default 0.0) the shift @f$ \beta @f$
- *      - power (\b optional, default 1.0) the power @f$ \gamma @f$
- */
+  public:
+  /**
+   * @param param provides PowerParameter power_param,
+   *        with PowerLayer options:
+   *      - scale (\b optional, default 1.0) the scale @f$ \alpha @f$
+   *      - shift (\b optional, default 0.0) the shift @f$ \beta @f$
+   *      - power (\b optional, default 1.0) the power @f$ \gamma @f$
+   */
   explicit MLUPowerLayer(const LayerParameter& param)
     :PowerLayer<Dtype>(param), power_op_ptr_(nullptr),
      scale_op_ptr_(nullptr) {}
@@ -62,7 +63,7 @@ class MLUPowerLayer:public PowerLayer<Dtype>{
   virtual void fuse(MFusion<Dtype>* fuser);
   virtual ~MLUPowerLayer();
 
- protected:
+  protected:
   virtual void MLUDestroyOp();
   virtual void MLUCreateOpBindData(const vector<Blob<Dtype>*>& bottom,
                                   const vector<Blob<Dtype>*>& top);
@@ -75,7 +76,6 @@ class MLUPowerLayer:public PowerLayer<Dtype>{
   Blob<Dtype>* beta_;
   Blob<Dtype>* temp_;
 };
-
 }    // namespace caffe
 #endif   //  USE_MLU
 #endif   //  INCLUDE_CAFFE_LAYERS_MLU_POWER_LAYER_HPP_

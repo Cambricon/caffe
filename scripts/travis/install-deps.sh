@@ -9,13 +9,16 @@ apt-get -y update
 apt-get install -y --no-install-recommends \
   build-essential \
   graphviz \
-  libboost-all-dev \
+  libboost-filesystem-dev \
+  libboost-python-dev \
+  libboost-system-dev \
+  libboost-thread-dev \
   libgflags-dev \
   libgoogle-glog-dev \
   libhdf5-serial-dev \
-  libopenblas-dev 
-  #python-virtualenv \
-  #wget
+  libopenblas-dev \
+  python-virtualenv \
+  wget
 
 if $WITH_CMAKE ; then
   apt-get install -y --no-install-recommends cmake

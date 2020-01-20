@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -30,6 +30,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #ifdef USE_MLU
 #include <vector>
 #include "caffe/layers/mlu_axpy_layer.hpp"
+
 namespace caffe {
 
 template <typename Dtype>
@@ -42,7 +43,7 @@ template <typename Dtype>
 void MLUAxpyLayer<Dtype>::Reshape_tensor(const vector<Blob<Dtype>*>& bottom,
                                         const vector<Blob<Dtype>*>& top) {
   BaseDataType cpu_dtype = sizeof(Dtype) == 4 ? DT_FLOAT32 : DT_DOUBLE;
-  BaseDataType mlu_dtype = DT_FLOAT16;
+  BaseDataType mlu_dtype = bottom[0]->mlu_type();
   CHECK_EQ(bottom[0]->num(), bottom[1]->num())
     << "number of bottom[0] and bottom[1] not equal";
   CHECK_EQ(bottom[0]->channels(), bottom[1]->channels())
@@ -52,10 +53,12 @@ void MLUAxpyLayer<Dtype>::Reshape_tensor(const vector<Blob<Dtype>*>& bottom,
   CHECK(bottom[1]->shape() == bottom[2]->shape());
   top[0]->Reshape(bottom[2]->shape(), cpu_dtype, mlu_dtype, CNML_TENSOR);
 }
+
 template <typename Dtype>
 void MLUAxpyLayer<Dtype>::fuse(MFusion<Dtype>* fuser) {
   fuser->fuse(axpy_op_ptr_);
 }
+
 template <typename Dtype>
 void MLUAxpyLayer<Dtype>::MLUCreateOpBindData(const vector<Blob<Dtype>*>& bottom,
                                              const vector<Blob<Dtype>*>& top) {
@@ -90,7 +93,7 @@ void MLUAxpyLayer<Dtype>::Forward_mlu(const vector<Blob<Dtype>*>& bottom,
                                     Caffe::forward_param(), Caffe::queue() ));
 }
 
-
 INSTANTIATE_CLASS(MLUAxpyLayer);
+
 }  // namespace caffe
 #endif  // USE_MLU

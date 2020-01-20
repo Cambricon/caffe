@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -39,6 +39,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "off_runner.hpp"
 #include "ssd_off_post.hpp"
 #include "common_functions.hpp"
+#include "simple_interface.hpp"
 
 using std::vector;
 using std::queue;
@@ -53,6 +54,7 @@ DEFINE_string(outputdir, ".", "The directory used to save output images and txt.
 
 #define PRE_READ
 
+typedef DataProvider<void*, BlockingQueue> DataProviderT;
 typedef OffDataProvider<void*, BlockingQueue> OffDataProviderT;
 typedef OffRunner<void*, BlockingQueue> OffRunnerT;
 typedef SsdOffPostProcessor<void*, BlockingQueue> SsdOffPostProcessorT;
@@ -86,6 +88,12 @@ int main(int argc, char* argv[]) {
     FLAGS_alsologtostderr = 1;
   }
 
+  auto& simpleInterface = SimpleInterface::getInstance();
+  // if simple_compile option has been specified to 1 by user, simple compile
+  int provider_num = 1;
+  simpleInterface.setFlag(true);
+  provider_num = SimpleInterface::data_provider_num_;
+
   std::stringstream sdevice(FLAGS_mludevice);
   vector<int> deviceIds_;
   std::string item;
@@ -93,27 +101,40 @@ int main(int argc, char* argv[]) {
     int device = std::atoi(item.c_str());
     deviceIds_.push_back(device);
   }
+
   int totalThreads = FLAGS_threads * deviceIds_.size();
 
   cnrtInit(0);
+  simpleInterface.loadOfflinemodel(FLAGS_offlinemodel, deviceIds_, FLAGS_channel_dup);
 
-  ImageReader img_reader(FLAGS_images, totalThreads);
+  ImageReader img_reader(FLAGS_images, totalThreads * provider_num);
   auto&& imageList = img_reader.getImageList();
   int imageNum = img_reader.getImageNum();
 
   vector<thread*> stageThreads;
   vector<PipelineT*> pipelines;
+  vector<DataProviderT*> providers;
   for (int i = 0; i < totalThreads; i++) {
-    int deviceId = deviceIds_[i % deviceIds_.size()];
-    auto provider = new OffDataProviderT(FLAGS_meanfile, FLAGS_meanvalue,
-                                         imageList[i]);
+    DataProviderT* provider;
+    OffRunnerT* runner;
+    PipelineT* pipeline;
 
-    auto runner = new OffRunnerT(FLAGS_offlinemodel, i,
-                                 FLAGS_dataparallel, deviceId, deviceIds_.size());
+    providers.clear();
+    // totalThreads is 1 for simple compile, otherwise,
+    // provider_num is 1 for flexible compile.
+    for (int j = 0; j < provider_num; j++) {
+      provider = new OffDataProviderT(FLAGS_meanfile, FLAGS_meanvalue,
+                                      imageList[provider_num * i + j]);
+      providers.push_back(provider);
+    }
 
     auto postprocessor = new SsdOffPostProcessorT();
 
-    auto pipeline = new PipelineT(provider, runner, postprocessor);
+    auto dev_runtime_contexts = simpleInterface.get_runtime_contexts();
+    int index = i % deviceIds_.size();
+    runner = new OffRunnerT(dev_runtime_contexts[index], i);
+    pipeline = new PipelineT(providers, runner, postprocessor);
+
     stageThreads.push_back(new thread(&PipelineT::runParallel, pipeline));
     pipelines.push_back(pipeline);
   }
@@ -133,11 +154,13 @@ int main(int argc, char* argv[]) {
   for (auto pipeline : pipelines) {
     mluTime += pipeline->runner()->runTime();
   }
-  printPerf(imageNum, execTime, mluTime, totalThreads);
+  int batchsize = pipelines[0]->runner()->n();
+  printPerf(imageNum, execTime, mluTime, 1, batchsize);
+  saveResult(imageNum, (-1), (-1), (-1), mluTime, execTime, 1, batchsize);
 
   for (auto pipeline : pipelines)
     delete pipeline;
-
+  simpleInterface.destroyRuntimeContext();
   cnrtDestroy();
 }
 

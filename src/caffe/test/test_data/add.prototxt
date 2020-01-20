@@ -1,0 +1,22 @@
+name: "add"
+layer {
+  name: "data"
+  type: "Input"
+  top: "data"
+  input_param { shape: { dim: 3 dim: 32 dim: 2 dim: 2 } }
+}
+
+layer {
+  name: "data2"
+  type: "Input"
+  top: "data2"
+  input_param { shape: { dim: 3 dim: 32 dim: 2 dim:2 } }
+}
+
+layer {
+  name: "add"
+  type: "Add"
+  top: "add"
+  bottom: "data"
+  bottom: "data2"
+}

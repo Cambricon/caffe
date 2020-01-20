@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -50,7 +50,6 @@ class OnRunner : public Runner<Dtype, Qtype>{
   OnRunner(const string& onlinemodel,
            const string& onlineweights,
            const int& id,
-           const int& dp,
            const int& deviceId,
            const int& deviceSize);
   OnRunner(const string& onlinemodel,
@@ -66,5 +65,7 @@ class OnRunner : public Runner<Dtype, Qtype>{
   caffe::Net<Dtype>* net_;
   vector<Dtype*> allocatedMLUPtrs_;
   vector<Dtype*> allocatedCpuPtrs_;
+  vector<Dtype*> allocatedSyncPtrs_;
+  vector<Dtype*> allocatedSyncTmpPtrs_;
 };
 #endif  // EXAMPLES_COMMON_INCLUDE_ON_RUNNER_HPP_

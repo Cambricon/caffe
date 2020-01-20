@@ -2,7 +2,7 @@
 All modification made by Cambricon Corporation: © 2018--2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -64,53 +64,6 @@ int forward_iteration;
 
 namespace caffe {
 
-template<typename Dtype>
-BlobDataType get_int8_info(Dtype* data, int length, bool lrn, float alpha,
-    map<string, Dtype>* max_value, string name = "") {
-  Dtype max, min, abs_max, position, scale;
-  min = max = data[0];
-  for (int j = 0; j < length; ++j) {
-    max = std::max(data[j], max);
-    min = std::min(data[j], min);
-  }
-  abs_max = std::max(-min, max);
-  if (name != "") {
-    typename map<string, Dtype>::iterator iter;
-    iter = max_value->find(name);
-    if (iter != max_value->end()) {
-      if (abs_max > iter->second) {
-        (*max_value)[name] =  abs_max;
-      } else {
-        abs_max = (*max_value)[name];
-      }
-    } else {
-      max_value->insert(pair<string, Dtype>(name, abs_max));
-    }
-  }
-  if (lrn) {
-    abs_max = abs_max * abs_max * alpha;
-  }
-  if (abs_max == 0)
-    position = 0;
-  else
-    position = log2(abs_max / 127);
-  if (position > 0)
-    position += 1;
-  if (abs_max == 0)
-    scale = 1;
-  else
-    scale = 127 * pow(2, static_cast<int>(position)) / abs_max;
-  caffe::BlobDataType blob_dtype;
-  if (position > 32)
-    position = 32;
-  if (position < -32)
-    position = -32;
-  blob_dtype.set_type(DT_INT8);
-  blob_dtype.set_position(position);
-  blob_dtype.set_scale(scale);
-  return blob_dtype;
-}
-
 template <typename Dtype>
 Net<Dtype>::Net(const NetParameter& param) {
   Init(param);
@@ -164,9 +117,9 @@ void Net<Dtype>::Init(const NetParameter& in_param) {
 #ifdef USE_MLU
   opt_level_ = in_param.opt_level();
   CHECK_GE(opt_level_, 0)
-    << "opt_level should be in: 0,1";
-  CHECK_LE(opt_level_, 1)
-    << "opt_level should be in: 0,1";
+    << "opt_level should be in: 0,1,2";
+  CHECK_LE(opt_level_, 2)
+    << "opt_level should be in: 0,1,2";
   // Optimize net
   if (opt_level_ > 0 &&
       (Caffe::mode() == Caffe::MLU || Caffe::mode() == Caffe::MFUS)) {
@@ -175,6 +128,12 @@ void Net<Dtype>::Init(const NetParameter& in_param) {
       NetParameter optimized_param_a;
       OptimizeSsd(param, &optimized_param_a);
       param = optimized_param_a;
+    }
+    //  optimize ConvBnScale structure
+    if (opt_level_ == 2) {
+      NetParameter optimized_param_b;
+      OptimizeConvBnScale(param, &optimized_param_b);
+      param = optimized_param_b;
     }
 
     LOG(INFO) << "[opt_level set] optimized parameter: " <<
@@ -196,17 +155,27 @@ void Net<Dtype>::Init(const NetParameter& in_param) {
   bottom_need_backward_.resize(param.layer_size());
   for (int layer_id = 0; layer_id < param.layer_size(); ++layer_id) {
     // Inherit phase from net if unset.
-    if (!param.layer(layer_id).has_phase()) {
+    if (!param.layer(layer_id).has_phase())
       param.mutable_layer(layer_id)->set_phase(phase_);
-    }
 #ifdef USE_MLU
     if (param.layer(layer_id).blobs_dtype_size() &&
-       (param.layer(layer_id).blobs_dtype(0).type() == DT_INT8)) {
+        (param.layer(layer_id).blobs_dtype(0).type() == DT_INT8)) {
       if (!int8_mode_flag_) {
         int8_mode_flag_ = true;
-        cnmlSetQuantizedThreadContext(int8_mode_flag_);
       }
     }
+    // top_mlu_dtype
+    if (Caffe::topDataType() != DT_INVALID) {
+      param.set_top_mlu_dtype(Caffe::topDataType());
+    }
+    if (param.has_top_mlu_dtype() && param.top_mlu_dtype() != DT_INVALID) {
+      param.mutable_layer(layer_id)->set_top_mlu_dtype(param.top_mlu_dtype());
+    }
+    // debug_dtype
+    if (param.debug_dtype()) {
+      param.mutable_layer(layer_id)->set_debug_dtype(param.debug_dtype());
+    }
+
 #endif
     // Setup layer.
     const LayerParameter& layer_param = param.layer(layer_id);
@@ -256,6 +225,22 @@ void Net<Dtype>::Init(const NetParameter& in_param) {
     layers_[layer_id]->SetUp(bottom_vecs_[layer_id], top_vecs_[layer_id]);
     LOG_IF(INFO, Caffe::root_solver()) << "Setting up "
                                        << layer_names_[layer_id];
+
+#ifdef USE_MLU
+    auto layer_type = static_cast<string>(layers_[layer_id]->type());
+    if (layer_type == "Proposal" ||
+        layer_type == "Region" ||
+        layer_type == "ROIPooling" ||
+        layer_type == "PSROIPooling" ||
+        layer_type == "DetectionOutput" ||
+        layer_type == "SsdDetection" ||
+        layer_type == "ImageDetect" ||
+        layer_type == "DetectionOut" ||
+        layer_type == "Yolov3Detection" ||
+        layer_type == "Region")
+      layers_[layer_id]->set_int8_context(int8_mode_flag_);
+#endif
+
     for (int top_id = 0; top_id < top_vecs_[layer_id].size(); ++top_id) {
       if (blob_loss_weights_.size() <= top_id_vecs_[layer_id][top_id]) {
         blob_loss_weights_.resize(top_id_vecs_[layer_id][top_id] + 1, Dtype(0));
@@ -452,17 +437,9 @@ void Net<Dtype>::InitSubnet() {
 }
 
 template <typename Dtype>
-void Net<Dtype>::genOfflineModel(
-    const std::string& name,
-    hardwareReshape_t hardware_reshape,
-    int model_parallel) {
+void Net<Dtype>::genOfflineModel(const std::string& name) {
   Caffe::set_mode(Caffe::MFUS);
   Caffe::setReshapeMode(Caffe::ReshapeMode::SETUPONLY);
-  if (model_parallel >= 1 && model_parallel <= 32) {
-    Caffe::setModelParallel(model_parallel);
-  } else {
-    LOG(ERROR) << "model_parallel should range from 1 to 32.";
-  }
   Reshape();
 
   unordered_map<Blob<Dtype>*, string> blob2name;
@@ -480,8 +457,7 @@ void Net<Dtype>::genOfflineModel(
   vector<vector<string>> input_blob_array;
   vector<vector<string>> output_blob_array;
   for (auto subnet : subnets_) {
-    subnet->addOffline(model, info, &subnet_off_index, blob2index, blob2name,
-                       hardware_reshape);
+    subnet->addOffline(model, info, &subnet_off_index, blob2index, blob2name);
     input_blob_array.push_back(subnet->inputBlobNames(blob2name));
     output_blob_array.push_back(subnet->outputBlobNames(blob2name));
   }
@@ -505,16 +481,9 @@ void Net<Dtype>::genOfflineModel(
 template <typename Dtype>
 bool Net<Dtype>::genOfflineModelToMem(void* buffer,
                 uint64_t* buffer_size,
-                uint64_t* model_size,
-                hardwareReshape_t hardware_reshape,
-                int model_parallel) {
+                uint64_t* model_size) {
   Caffe::set_mode(Caffe::MFUS);
   Caffe::setReshapeMode(Caffe::ReshapeMode::SETUPONLY);
-  if (model_parallel >= 1 && model_parallel <= 32) {
-    Caffe::setModelParallel(model_parallel);
-  } else {
-    LOG(ERROR) << "model_parallel should range from 1 to 32.";
-  }
   Reshape();
   unordered_map<Blob<Dtype>*, string> blob2name;
   unordered_map<Blob<Dtype>*, int> blob2index;
@@ -531,8 +500,7 @@ bool Net<Dtype>::genOfflineModelToMem(void* buffer,
   }
   int subnet_off_index = 0;
   for (auto subnet : subnets_) {
-    subnet->addOffline(model, info, &subnet_off_index, blob2index, blob2name,
-                       hardware_reshape);
+    subnet->addOffline(model, info, &subnet_off_index, blob2index, blob2name);
   }
   LOG(INFO) << "Start to Save Model" << std::endl;
   if (CNML_STATUS_SUCCESS !=
@@ -543,6 +511,100 @@ bool Net<Dtype>::genOfflineModelToMem(void* buffer,
     return false;
   }
   return true;
+}
+
+template <typename Dtype>
+bool Net<Dtype>::genOfflineModelToMem(void** buffer, uint64_t* model_size) {
+  Caffe::set_mode(Caffe::MFUS);
+  Caffe::setReshapeMode(Caffe::ReshapeMode::SETUPONLY);
+  Reshape();
+  unordered_map<Blob<Dtype>*, string> blob2name;
+  unordered_map<Blob<Dtype>*, int> blob2index;
+  for (int i = blobs_.size() - 1; i >= 0; i--) {
+    blob2name[blobs_[i].get()] = blob_names_[i];
+    blob2index[blobs_[i].get()] = i;
+  }
+
+  std::stringstream info;
+  cnmlModel_t model;
+  string name = "offline";
+  if (CNML_STATUS_SUCCESS != cnmlCreateModel(&model, name.c_str())) {
+    return false;
+  }
+  int subnet_off_index = 0;
+  for (auto subnet : subnets_) {
+    subnet->addOffline(model, info, &subnet_off_index, blob2index, blob2name);
+  }
+  uint64_t ms = 0, realsize = 0;
+  cnmlGetModelSize(model, &ms);
+  void * buf = malloc(ms);
+
+  LOG(INFO) << "Start to Save Model" << std::endl;
+  if (CNML_STATUS_SUCCESS != cnmlSaveModelToMem(model, buf, ms, &realsize)) {
+    free(buf);
+    return false;
+  }
+  if (CNML_STATUS_SUCCESS != cnmlDestroyModel(model)) {
+    free(buf);
+    return false;
+  }
+
+  *buffer = buf;
+  *model_size = ms;
+  return true;
+}
+
+template <typename Dtype>
+void Net<Dtype>::OptimizeConvBnScale(NetParameter param,
+                           NetParameter* const param_optimized) {
+  param_optimized->CopyFrom(param);
+  bool need_opt = false;
+  auto layer_optimized = GetConvBnScaleStruct(param);
+  for (const auto& item : layer_optimized) {
+    if (item.size()) {
+      need_opt = true;
+      break;
+    }
+  }
+  if (need_opt) {
+    vector<int> layer_passed(param.layer_size(), 0);
+    //  log optimized structs
+    //  tag layers to delete
+    for (int i = 0; i < param.layer_size(); i++) {
+      if (layer_optimized[i].size()) {
+        param.mutable_layer(i)->mutable_convolution_param()->set_bias_term(true);
+        LOG(INFO) << "[opt_level set] ConvBnScale optimization "
+          <<"structure detected";
+        LOG(INFO) << "=================conv layer "
+                  << param.layer(i).name();
+        for (int j = 0; j < layer_optimized[i].size(); j++) {
+          int k = layer_optimized[i][j];
+          layer_passed[k] = 1;
+          LOG(INFO) << param.layer(k).name();
+        }
+        LOG(INFO) << "=====================";
+      }
+    }
+    DeleteOptimizedLayers(param, param_optimized, layer_passed);
+    //  a special value to notify CopyFromTrainedLayers
+    //  that ConvBnScale optimization is detected.
+    //  -1 means only ConBnScale optimization detected
+    //  -2 means both ConvBnScale optimization is detected and int8 enabled
+    //  we have to recalculate int8 info for weights
+    //  bottom data stays unchanged
+    //  so we don't have to recalculate bottom_mlu_dtype
+    //  Ssd Optimization need no int8 recalculation cauz it's just a prototxt level
+    //  optimization.
+    opt_level_ = -1;
+    if (IsInt8Net(*param_optimized)) {
+      LOG(INFO) << "[opt_level set] Int8 enabled, weights of int8 info will be "
+        << "recalculated";
+      opt_level_ = -2;
+    }
+  } else {
+    LOG(INFO) << "[opt_level set] the model doesn't need"
+      << "ConvBnScale optimization";
+  }
 }
 
 template <typename Dtype>
@@ -895,6 +957,18 @@ void Net<Dtype>::AppendParam(const NetParameter& param, const int layer_id,
 #ifdef USE_MLU
 
 template <typename Dtype>
+void Net<Dtype>::RecalculateWeightsInt8Info(shared_ptr<Blob<Dtype>> weights_blob,
+    const LayerParameter& param) {
+  BlobDataType blob_dtype = get_quantized_info(*weights_blob, param, "common", DT_INT8);
+  weights_blob->set_mlu_position(blob_dtype.position(0));
+  weights_blob->set_mlu_scale(blob_dtype.scale(0));
+  LOG(INFO) << param.name() << " weights of int8 info:";
+  LOG(INFO) << "position: " << blob_dtype.position(0);
+  LOG(INFO) << "scale: " << blob_dtype.scale(0);
+  LOG(INFO) << "------------------------------------------------------";
+}
+
+template <typename Dtype>
 Dtype Net<Dtype>::ForwardFromTo(int start, int end) {
   // Reshape logic is pelt from Forward in layers. Now, it's handled
   // by Net here to reduce reshaping which could be unneeded.
@@ -1239,6 +1313,7 @@ SegmentInfo* Net<Dtype>::GenSegmentInfo(
 
 template <typename Dtype>
 void Net<Dtype>::OfflineRunInit(const SegmentInfo& seg_info) {
+  cnrtInit(0);
   cnrtDev_t dev;
   cnrtGetDeviceHandle(&dev, 0);
   cnrtSetCurrentDevice(dev);
@@ -1266,92 +1341,80 @@ void Net<Dtype>::OfflineRunInit(const SegmentInfo& seg_info) {
 
 template <typename Dtype>
 void Net<Dtype>::OfflineMluSubnetRun(const cnrtModel_t& model,
-                                     const int data_parallel,
                                      const cnrtDataType_t& dtype,
-                                     const SegmentInfoUnit& unit_info) {
-  cnrtDataDescArray_t inputDescS;
-  cnrtDataDescArray_t outputDescS;
+                                     const SegmentInfoUnit& unit_info,
+                                     void** cpuData) {
   void** inputMluPtrS;
   void** outputMluPtrS;
   void** inputCpuPtrS;
   void** outputCpuPtrS;
   int input_num, output_num;
+  int64_t *inputSizeArray;
+  int64_t *outputSizeArray;
   string func_name = unit_info.name();
   if (name_to_cnrt_func_.find(func_name) == name_to_cnrt_func_.end()) {
     cnrtFunction_t func;
     cnrtCreateFunction(&func);
     cnrtExtractFunction(&func, model, func_name.c_str());
-    cnrtInitFuncParam_t initFuncParam;
-    bool muta = false;
-    unsigned int affinity = 0x01;
-    int dp = data_parallel;
-    initFuncParam.muta = &muta;
-    initFuncParam.affinity = &affinity;
-    initFuncParam.data_parallelism = &dp;
-    initFuncParam.end = CNRT_PARAM_END;
-    cnrtInitFunctionMemory_V2(func, &initFuncParam);
     name_to_cnrt_func_[func_name] = func;
   }
+
   if (name_to_cnrt_queue_.find(func_name) == name_to_cnrt_queue_.end()) {
     cnrtQueue_t cnrt_queue;
     cnrtCreateQueue(&cnrt_queue);
     name_to_cnrt_queue_[func_name] = cnrt_queue;
   }
-  cnrtGetInputDataDesc(&inputDescS, &input_num,
-                       name_to_cnrt_func_.at(func_name));
-  cnrtGetOutputDataDesc(&outputDescS, &output_num,
-                        name_to_cnrt_func_.at(func_name));
+
   inputCpuPtrS = reinterpret_cast<void**>(malloc(sizeof(void**) * input_num));
   outputCpuPtrS = reinterpret_cast<void**>(malloc(sizeof(void**) * output_num));
+
+  CNRT_CHECK(cnrtGetInputDataSize(&inputSizeArray, &input_num,
+                                  name_to_cnrt_func_[func_name]));
+  CNRT_CHECK(cnrtGetOutputDataSize(&outputSizeArray, &output_num,
+                                   name_to_cnrt_func_[func_name]));
   for (int i = 0; i < input_num; i++) {
-    cnrtDataDesc_t inputDesc = inputDescS[i];
-    cnrtSetHostDataLayout(inputDesc, dtype, CNRT_NCHW);
+    Blob<Dtype>* blob = name_to_data_.at(unit_info.bottom(i));
+    if ("subnet0" == func_name) {
+      caffe_copy(inputSizeArray[i], reinterpret_cast<Dtype*>(cpuData[0]),
+                 blob->mutable_cpu_data());
+    }
+    inputCpuPtrS[i] = reinterpret_cast<void*>(blob->mutable_cpu_data());
   }
+
   for (int i = 0; i < output_num; i++) {
-    cnrtDataDesc_t outputDesc = outputDescS[i];
-    cnrtSetHostDataLayout(outputDesc, dtype, CNRT_NCHW);
     Blob<Dtype>* blob = name_to_data_.at(unit_info.top(i));
     outputCpuPtrS[i] = reinterpret_cast<void*>(blob->mutable_cpu_data());
   }
-
-  cnrtMallocBatchByDescArray(&inputMluPtrS, inputDescS, input_num,
-                             data_parallel);
-  cnrtMallocBatchByDescArray(&outputMluPtrS, outputDescS, output_num,
-                             data_parallel);
 
   void** param = reinterpret_cast<void**>(
       malloc(sizeof(void**) * (input_num + output_num)));
 
   for (int i = 0; i < input_num; i++) {
-    Blob<Dtype>* blob = name_to_data_.at(unit_info.bottom(i));
-    inputCpuPtrS[i] = reinterpret_cast<void*>(blob->mutable_cpu_data());
-  }
-
-  for (int i = 0; i < input_num; i++) {
+    cnrtMalloc(&(inputMluPtrS[i]), inputSizeArray[i]);
     param[i] = inputMluPtrS[i];
   }
   for (int i = 0; i < output_num; i++) {
+    cnrtMalloc(&(outputMluPtrS[i]), outputSizeArray[i]);
     param[input_num + i] = outputMluPtrS[i];
   }
-
-  cnrtMemcpyBatchByDescArray(inputMluPtrS, inputCpuPtrS, inputDescS, input_num,
-                             data_parallel, CNRT_MEM_TRANS_DIR_HOST2DEV);
+  for (int i = 0; i < input_num; i++) {
+    CNRT_CHECK(cnrtMemcpy(inputMluPtrS[i], inputCpuPtrS[i],
+          inputSizeArray[i], CNRT_MEM_TRANS_DIR_HOST2DEV));
+  }
   //  create start_event and end_event
   cnrtNotifier_t notifierBeginning, notifierEnd;
   cnrtCreateNotifier(&notifierBeginning);
   cnrtCreateNotifier(&notifierEnd);
-  cnrtInvokeFuncParam_t invokeFuncParam;
   float event_time_used;
-  cnrtDim3_t dim = {1, 1, 1};
-  unsigned int affinity = 0x01;
-  int dp = data_parallel;
-  invokeFuncParam.data_parallelism = &dp;
-  invokeFuncParam.affinity = &affinity;
-  invokeFuncParam.end = CNRT_PARAM_END;
-  cnrtFunctionType_t funcType = (cnrtFunctionType_t)0;
   cnrtPlaceNotifier(notifierBeginning, name_to_cnrt_queue_.at(func_name));
-  CNRT_CHECK(cnrtInvokeFunction_V2(name_to_cnrt_func_[func_name], dim, param, funcType,
-                     name_to_cnrt_queue_.at(func_name), &invokeFuncParam));
+  cnrtRuntimeContext_t rt_ctx;
+  if (cnrtCreateRuntimeContext(&rt_ctx, name_to_cnrt_func_[func_name],
+                               nullptr) != CNRT_RET_SUCCESS) {
+    LOG(FATAL)<< "Failed to create runtime context";
+  }
+  cnrtInitRuntimeContext(rt_ctx, NULL);
+  CNRT_CHECK(cnrtInvokeRuntimeContext(rt_ctx, param,
+                     name_to_cnrt_queue_.at(func_name), nullptr));
   cnrtPlaceNotifier(notifierEnd, name_to_cnrt_queue_.at(func_name));
   if (cnrtSyncQueue(name_to_cnrt_queue_.at(func_name)) == CNRT_RET_SUCCESS) {
     cnrtNotifierDuration(notifierBeginning, notifierEnd, &event_time_used);
@@ -1359,9 +1422,10 @@ void Net<Dtype>::OfflineMluSubnetRun(const cnrtModel_t& model,
   } else {
     LOG(ERROR) << " SyncQueue error " << std::endl;
   }
-  cnrtMemcpyBatchByDescArray(outputCpuPtrS, outputMluPtrS, outputDescS,
-                             output_num, data_parallel,
-                             CNRT_MEM_TRANS_DIR_DEV2HOST);
+  for (int i = 0; i < output_num; i++) {
+    CNRT_CHECK(cnrtMemcpy(outputCpuPtrS[i], outputMluPtrS[i],
+          outputSizeArray[i], CNRT_MEM_TRANS_DIR_DEV2HOST));
+  }
 
   free(inputCpuPtrS);
   free(outputCpuPtrS);
@@ -1380,8 +1444,8 @@ void Net<Dtype>::OfflineCpuSubnetRun(const SegmentInfoUnit& unit_info) {
 template <typename Dtype>
 void Net<Dtype>::OfflineNetRun(const SegmentInfo& seg_info,
                                const cnrtModel_t& model,
-                               const int data_parallel,
-                               const cnrtDataType_t& dtype) {
+                               const cnrtDataType_t& dtype,
+                               void** cpuData) {
   if (!offline_init_flag_) OfflineRunInit(seg_info);
   for (int i = 0; i < seg_info.unit_size(); i++) {
     const SegmentInfoUnit& seg_unit = seg_info.unit(i);
@@ -1390,7 +1454,7 @@ void Net<Dtype>::OfflineNetRun(const SegmentInfo& seg_info,
         OfflineCpuSubnetRun(seg_unit);
         break;
       case SegmentInfoUnit_TYPE_MLU:
-        OfflineMluSubnetRun(model, data_parallel, dtype, seg_unit);
+        OfflineMluSubnetRun(model, dtype, seg_unit, cpuData);
         break;
     }
   }
@@ -1550,6 +1614,15 @@ void Net<Dtype>::CopyTrainedLayersFrom(const NetParameter& param) {
       const bool kReshape = false;
       target_blobs[j]->FromProto(source_layer.blobs(j), kReshape);
     }
+#ifdef USE_MLU
+    // recalculate weights int8 info for int8 ConvBnScale optimization
+    if (opt_level_ == -2 &&
+        layers_[target_layer_id]->layer_param().blobs_dtype().size() &&
+        target_blobs.size() > 0) {
+      RecalculateWeightsInt8Info(target_blobs[0],
+          layers_[target_layer_id]->layer_param());
+    }
+#endif
   }
   if (tmp_layers.size()) {
     for (auto it : tmp_layers) {
@@ -1575,7 +1648,11 @@ template <typename Dtype>
 void Net<Dtype>::CopyTrainedLayersFromBinaryProto(
     const string trained_filename) {
   NetParameter param;
-  ReadNetParamsFromBinaryFileOrDie(trained_filename, &param);  //NOLINT
+  ReadNetParamsFromBinaryFileOrDie(trained_filename, &param
+#ifdef USE_MLU
+      , opt_level_, &net_param_without_weights_
+#endif
+      );  //NOLINT
   CopyTrainedLayersFrom(param);
 }
 
@@ -1809,10 +1886,9 @@ void Net<Dtype>::blob_info() const {
 }
 
 template <typename Dtype>
-void Net<Dtype>::ToInt8Prototxt(map<string, Dtype>* max_value,
-                                string output_file,
-                                bool use_ini,
-                                bool write ) {
+void Net<Dtype>::ToquantizedPrototxt(map<string, Dtype>* max_value,
+                                string output_file, string mode, BaseDataType type,
+                                BaseDataType top_dtype, bool use_ini, bool write ) {
   NetParameter net_param;
   net_param.set_name("default");
   auto bottom_vecs = this->bottom_vecs();
@@ -1821,14 +1897,15 @@ void Net<Dtype>::ToInt8Prototxt(map<string, Dtype>* max_value,
     LayerParameter* layer_param = this->layers()[i]->mutable_layer_param();
     string layer_type = layer_param->type();
     if (layer_type == "Convolution" ||
+        layer_type == "Convolution3D" ||
         layer_type == "Deconvolution" ||
         layer_type == "InnerProduct" || layer_type == "LRN" ||
         layer_type == "Reorg") {
       // bottom dtype
       BlobDataType blob_dtype;
       for (int j = 0; j < bottom_vecs[i].size(); j++) {
-        blob_dtype = get_int8_info(*bottom_vecs[i][j],
-            *layer_param, max_value);
+        blob_dtype = get_quantized_info(*bottom_vecs[i][j],
+            *layer_param, mode, type, false, max_value);
         if (write) {
           if (layer_param->bottom_mlu_dtype_size() > j) {
             *(layer_param->mutable_bottom_mlu_dtype(j)) = blob_dtype;
@@ -1841,7 +1918,7 @@ void Net<Dtype>::ToInt8Prototxt(map<string, Dtype>* max_value,
       auto blobs = this->layers()[i]->blobs();
       if (blobs.size() != 0) {
         blob_dtype  =
-            get_int8_info(*blobs[0].get(), *layer_param);
+            get_quantized_info(*blobs[0].get(), *layer_param, mode, type, true);
         if (write) {
           if (layer_param->blobs_dtype_size()) {
             *(layer_param->mutable_blobs_dtype(0)) = blob_dtype;
@@ -1849,6 +1926,8 @@ void Net<Dtype>::ToInt8Prototxt(map<string, Dtype>* max_value,
             layer_param->add_blobs_dtype()->CopyFrom(blob_dtype);
           }
         }
+        if (top_dtype == DT_FLOAT32)
+          layer_param->set_top_mlu_dtype(DT_FLOAT32);
       }
     } else if (layer_type == "Normalize") {
       int n = bottom_vecs[i][0]->num();
@@ -1867,16 +1946,17 @@ void Net<Dtype>::ToInt8Prototxt(map<string, Dtype>* max_value,
       for (int n = 0; n < sqr_blob.count(); n++) {
         div_blob.mutable_cpu_data()[n] = bottom_vecs[i][0]->cpu_data()[n] / max;
       }
-      BlobDataType blob_dtype = get_int8_info(div_blob,
-          *layer_param, (map<string, Dtype>* const)nullptr, true);
+      BlobDataType blob_dtype = get_quantized_info(div_blob,
+          *layer_param, mode, type, false, (map<string, Dtype>* const)nullptr, true);
       if (write) {
         if (layer_param->bottom_mlu_dtype_size()) {
           *(layer_param->mutable_bottom_mlu_dtype(0)) = blob_dtype;
         } else {
           layer_param->add_bottom_mlu_dtype()->CopyFrom(blob_dtype);
         }
+        if (top_dtype == DT_FLOAT32)
+          layer_param->set_top_mlu_dtype(DT_FLOAT32);
       }
-
       NormalizeParameter norm_param = layer_param->norm_param();
       if (!norm_param.across_spatial()) {
         int n = bottom_vecs[i][0]->num();
@@ -1905,7 +1985,7 @@ void Net<Dtype>::ToInt8Prototxt(map<string, Dtype>* max_value,
           gemv_blob.mutable_cpu_data()[n] = pow(gemv_blob.cpu_data()[n], 0.5);
         }
         blob_dtype =
-            get_int8_info(gemv_blob, *layer_param);
+            get_quantized_info(gemv_blob, *layer_param, mode, type);
         if (write) {
           if (layer_param->bottom_mlu_dtype_size() > 1) {
             *(layer_param->mutable_bottom_mlu_dtype(1)) = blob_dtype;
@@ -1917,9 +1997,14 @@ void Net<Dtype>::ToInt8Prototxt(map<string, Dtype>* max_value,
       if (write) {
         blob_dtype.Clear();
         blob_dtype.set_type(DT_INT8);
-        (norm_param.across_spatial()) ?
-            blob_dtype.add_position(-6):
-            blob_dtype.add_position(-16);
+        if (mode == "common") {
+          (norm_param.across_spatial()) ?
+              blob_dtype.add_position(-6):
+              blob_dtype.add_position(-16);
+        } else {
+          blob_dtype.add_position(0);
+          blob_dtype.add_scale(pow(2, static_cast<int>(10)));
+        }
         if (layer_param->blobs_dtype_size())
           *(layer_param->mutable_blobs_dtype(0)) = blob_dtype;
         else
@@ -1965,6 +2050,8 @@ void Net<Dtype>::ToInt8Prototxt(map<string, Dtype>* max_value,
       blobshape->add_dim(h);
       blobshape->add_dim(w);
       input_layer_param->set_allocated_input_param(input_param);
+      if (top_dtype == DT_FLOAT32)
+        input_layer_param->set_top_mlu_dtype(DT_FLOAT32);
       for (int i = 1; i < net_param.layer_size(); i++) {
         net_param1.add_layer()->CopyFrom(net_param.layer(i));
       }

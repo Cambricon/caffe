@@ -1,5 +1,5 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
 Copyright (c) 2014--2018, the respective contributors

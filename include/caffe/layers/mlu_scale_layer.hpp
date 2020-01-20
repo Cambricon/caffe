@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -29,13 +29,19 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #ifndef INCLUDE_CAFFE_LAYERS_MLU_SCALE_LAYER_HPP_
 #define INCLUDE_CAFFE_LAYERS_MLU_SCALE_LAYER_HPP_
+#ifdef USE_MLU
 
 #include <vector>
-
 #include "caffe/layers/scale_layer.hpp"
 
 namespace caffe {
-#ifdef USE_MLU
+
+/**
+ * @brief MLU acceleration of ScaleLayer
+ *        Computes the elementwise product of two input Blobs, with the shape of
+ *  the latter Blob "broadcast" to match the shape of the former.Equivalent to
+ *  tiling the latter Blob, then computing the elementwise product.
+ */
 template <typename Dtype>
 class MLUScaleLayer : public ScaleLayer<Dtype> {
   public:
@@ -45,14 +51,27 @@ class MLUScaleLayer : public ScaleLayer<Dtype> {
         inter_scale_shape(4, 1), real_bottom_shape(4, 1),
         inter_bottom_shape(4, 1), alpha_shape(), reshape_param_(nullptr),
         reshape1_param_(nullptr), reshape2_param_(nullptr),
+        transpose_bottom_d2h_param_(nullptr), transpose_bottom_h2d_param_(nullptr),
+        transpose_alpha_d2h_param_(nullptr), transpose_alpha_h2d_param_(nullptr),
+        transpose_top_d2h_param_(nullptr), transpose_top_h2d_param_(nullptr),
         reshape_op0_ptr_(nullptr), reshape_op1_ptr_(nullptr),
-        reshape_op2_ptr_(nullptr), bias_param_id_(-1), need_reshape_(true) {
-          op_ptrs_.push_back(&mlu_scale_op_ptr_);
-          op_ptrs_.push_back(&mlu_cmul_op_ptr_);
-          op_ptrs_.push_back(&mlu_cadd_op_ptr_);
-          op_ptrs_.push_back(&reshape_op0_ptr_);
-          op_ptrs_.push_back(&reshape_op1_ptr_);
-          op_ptrs_.push_back(&reshape_op2_ptr_);
+        reshape_op2_ptr_(nullptr),
+        transpose_bottom_d2h_op_ptr_(nullptr), transpose_bottom_h2d_op_ptr_(nullptr),
+        transpose_alpha_d2h_op_ptr_(nullptr), transpose_alpha_h2d_op_ptr_(nullptr),
+        transpose_top_d2h_op_ptr_(nullptr), transpose_top_h2d_op_ptr_(nullptr),
+        bias_param_id_(-1), need_reshape_(true) {
+        op_ptrs_.push_back(&mlu_scale_op_ptr_);
+        op_ptrs_.push_back(&mlu_cmul_op_ptr_);
+        op_ptrs_.push_back(&mlu_cadd_op_ptr_);
+        op_ptrs_.push_back(&reshape_op0_ptr_);
+        op_ptrs_.push_back(&reshape_op1_ptr_);
+        op_ptrs_.push_back(&reshape_op2_ptr_);
+        op_ptrs_.push_back(&transpose_bottom_d2h_op_ptr_);
+        op_ptrs_.push_back(&transpose_bottom_h2d_op_ptr_);
+        op_ptrs_.push_back(&transpose_alpha_d2h_op_ptr_);
+        op_ptrs_.push_back(&transpose_alpha_h2d_op_ptr_);
+        op_ptrs_.push_back(&transpose_top_d2h_op_ptr_);
+        op_ptrs_.push_back(&transpose_top_h2d_op_ptr_);
         }
   virtual void LayerSetUp(const vector<Blob<Dtype>*>& bottom,
                           const vector<Blob<Dtype>*>& top);
@@ -76,7 +95,6 @@ class MLUScaleLayer : public ScaleLayer<Dtype> {
   virtual void MLUCreateOpBindScale_(const vector<Blob<Dtype>*>& bottom,
                                    const vector<Blob<Dtype>*>& top);
   virtual void MLUCompileOp();
-
   virtual void Forward_mlu(const vector<Blob<Dtype>*>& bottom,
                            const vector<Blob<Dtype>*>& top);
   virtual void ForwardMLU(const vector<Blob<Dtype>*>& bottom,
@@ -95,18 +113,35 @@ class MLUScaleLayer : public ScaleLayer<Dtype> {
   cnmlReshapeOpParam_t reshape_param_;
   cnmlReshapeOpParam_t reshape1_param_;
   cnmlReshapeOpParam_t reshape2_param_;
+  cnmlNdTransposeOpParam_t transpose_bottom_d2h_param_;
+  cnmlNdTransposeOpParam_t transpose_bottom_h2d_param_;
+  cnmlNdTransposeOpParam_t transpose_alpha_d2h_param_;
+  cnmlNdTransposeOpParam_t transpose_alpha_h2d_param_;
+  cnmlNdTransposeOpParam_t transpose_top_d2h_param_;
+  cnmlNdTransposeOpParam_t transpose_top_h2d_param_;
   cnmlBaseOp_t reshape_op0_ptr_;
   cnmlBaseOp_t reshape_op1_ptr_;
   cnmlBaseOp_t reshape_op2_ptr_;
+  cnmlBaseOp_t transpose_bottom_d2h_op_ptr_;
+  cnmlBaseOp_t transpose_bottom_h2d_op_ptr_;
+  cnmlBaseOp_t transpose_alpha_d2h_op_ptr_;
+  cnmlBaseOp_t transpose_alpha_h2d_op_ptr_;
+  cnmlBaseOp_t transpose_top_d2h_op_ptr_;
+  cnmlBaseOp_t transpose_top_h2d_op_ptr_;
   Blob<Dtype> op_bottom0_blob_;
   Blob<Dtype> op_bottom1_blob_;
   Blob<Dtype> op_top0_blob_;
   Blob<Dtype> op_top1_blob_;
+  Blob<Dtype> transpose_bottom_d2h_blob_;
+  Blob<Dtype> transpose_bottom_h2d_blob_;
+  Blob<Dtype> transpose_alpha_d2h_blob_;
+  Blob<Dtype> transpose_alpha_h2d_blob_;
+  Blob<Dtype> transpose_top_d2h_blob_;
+  Blob<Dtype> transpose_top_h2d_blob_;
   int bias_param_id_;
   bool need_reshape_;
   vector<cnmlBaseOp_t*> op_ptrs_;
 };
-#endif  // USE_MLU
 }  // namespace caffe
-
+#endif  // USE_MLU
 #endif  // INCLUDE_CAFFE_LAYERS_MLU_SCALE_LAYER_HPP_

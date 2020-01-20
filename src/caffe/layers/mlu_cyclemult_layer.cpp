@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -42,7 +42,7 @@ void MLUCycleMultLayer<Dtype>::Reshape_tensor(
     << "channel of bottom[0] and botoom[1] not equal";
 
   BaseDataType cpu_dtype = sizeof(Dtype) == 4 ? DT_FLOAT32 : DT_DOUBLE;
-  BaseDataType mlu_dtype = DT_FLOAT16;
+  BaseDataType mlu_dtype = bottom[0]->mlu_type();
   top[0]->Reshape(bottom[0]->shape(), cpu_dtype, mlu_dtype, CNML_TENSOR);
 }
 
@@ -61,7 +61,7 @@ template <typename Dtype>
 void MLUCycleMultLayer<Dtype>::MLUCompileOp() {
     MLU_CHECK(cnmlCompileBaseOp(cyclemult_op_ptr_,
                                 Caffe::rt_core(),
-                                Caffe::model_parallel()));
+                                Caffe::core_number()));
 }
 
 template <typename Dtype>

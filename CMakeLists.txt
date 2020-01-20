@@ -10,8 +10,8 @@ endif()
 project(Caffe C CXX)
 
 # ---[ Caffe version
-set(CAFFE_TARGET_VERSION "5.1.1" CACHE STRING "Caffe logical version")
-set(CAFFE_TARGET_SOVERSION "5.1.1" CACHE STRING "Caffe soname version")
+set(CAFFE_TARGET_VERSION "5.2.0" CACHE STRING "Caffe logical version")
+set(CAFFE_TARGET_SOVERSION "5.2.0" CACHE STRING "Caffe soname version")
 add_definitions(-DCAFFE_VERSION=${CAFFE_TARGET_VERSION})
 
 # ---[ Using cmake scripts and modules
@@ -38,6 +38,7 @@ caffe_option(USE_HDF5 "Build Caffe with hdf5" ON)
 caffe_option(BUILD_SHARED_LIBS "Build shared libraries" ON)
 caffe_option(BUILD_python "Build Python wrapper" ON)
 set(python_version "2" CACHE STRING "Specify which Python version to use")
+caffe_option(BUILD_matlab "Build Matlab wrapper" OFF IF UNIX OR APPLE)
 caffe_option(BUILD_python_layer "Build the Caffe Python layer" ON)
 caffe_option(USE_OPENCV "Build with OpenCV support" ON)
 caffe_option(USE_LEVELDB "Build with levelDB" ON)

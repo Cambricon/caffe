@@ -2,7 +2,7 @@
 All modification made by Cambricon Corporation: © 2018--2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -29,15 +29,12 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #ifndef INCLUDE_CAFFE_LAYERS_MLU_PERMUTE_LAYER_HPP_
 #define INCLUDE_CAFFE_LAYERS_MLU_PERMUTE_LAYER_HPP_
-
 #ifdef USE_MLU
 
 #include <vector>
-
 #include "caffe/blob.hpp"
 #include "caffe/layer.hpp"
 #include "caffe/proto/caffe.pb.h"
-
 #include "caffe/layers/permute_layer.hpp"
 
 namespace caffe {
@@ -73,13 +70,11 @@ class MLUPermuteLayer : public PermuteLayer<Dtype> {
                                    const vector<Blob<Dtype>*>& top);
   virtual void MLUCompileOp();
 
-  cnmlTransposeOpParam_t transpose_op_param_ptr_;
+  cnmlNdTransposeOpParam_t transpose_op_param_ptr_;
   cnmlBaseOp_t transpose_pro_op_ptr_;
   cnmlBaseOp_t memcpy_op_ptr_;
   bool transpose_;
 };
-
 }  // namespace caffe
-
 #endif  // USE_MLU
 #endif  // INCLUDE_CAFFE_LAYERS_MLU_PERMUTE_LAYER_HPP_

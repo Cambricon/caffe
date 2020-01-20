@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -86,21 +86,21 @@ vector<cv::Scalar> SsdProcessor<Dtype, Qtype>::getColors(const int n) {
 }
 
 template <typename Dtype, template <typename> class Qtype>
-void SsdProcessor<Dtype, Qtype>::WriteVisualizeBBox_offline(const vector<cv::Mat>& images,
-                   const vector<vector<vector<float>>> detections,
+void SsdProcessor<Dtype, Qtype>::WriteVisualizeBBox(const vector<cv::Mat>& images,
+                   const vector<vector<vector<float>>>& detections,
                    const float threshold, const vector<cv::Scalar>& colors,
                    const map<int, string>& labelNameMap,
-                   const vector<string>& names) {
+                   const vector<string>& names, const int& from, const int& to) {
   // Retrieve detections.
-  const int num_img = images.size();
-  vector<LabelBBox> all_detections(num_img);
+  // const int num_img = images.size();
   int fontface = cv::FONT_HERSHEY_SIMPLEX;
   double scale = 1;
   int thickness = 2;
   int baseline = 0;
   char buffer[50];
 
-  for (int i = 0; i < num_img; ++i) {
+  // for (int i = 0; i < num_img; ++i) {
+  for (int i = from; i < to; ++i) {
     cv::Mat tmp = images[i];
     cv::Mat image;
     if (FLAGS_yuv) {
@@ -108,8 +108,8 @@ void SsdProcessor<Dtype, Qtype>::WriteVisualizeBBox_offline(const vector<cv::Mat
     } else {
       image = tmp;
     }
+    LabelBBox labelMap;
     for (int j = 0; j < detections[i].size(); j++) {
-      const int img_idx = i;
       const int label = detections[i][j][1];
       const float score = detections[i][j][2];
       if (score < threshold) {
@@ -125,7 +125,7 @@ void SsdProcessor<Dtype, Qtype>::WriteVisualizeBBox_offline(const vector<cv::Mat
       bbox.set_ymax(detections[i][j][6] *
                     image.rows);
       bbox.set_score(score);
-      all_detections[img_idx][label].push_back(bbox);
+      labelMap[label].push_back(bbox);
     }
 
     std::string name = names[i];
@@ -133,7 +133,7 @@ void SsdProcessor<Dtype, Qtype>::WriteVisualizeBBox_offline(const vector<cv::Mat
     if (pos > 0 && pos < names[i].size()) {
       name = name.substr(pos + 1);
     }
-    pos = name.rfind(".");
+    pos = name.find(".");
     if (pos > 0 && pos < name.size()) {
       name = name.substr(0, pos);
     }
@@ -141,7 +141,7 @@ void SsdProcessor<Dtype, Qtype>::WriteVisualizeBBox_offline(const vector<cv::Mat
     std::ofstream file(name);
     // Draw bboxes.
     for (map<int, vector<NormalizedBBox> >::iterator it =
-         all_detections[i].begin(); it != all_detections[i].end(); ++it) {
+         labelMap.begin(); it != labelMap.end(); ++it) {
       int label = it->first;
       string label_name = "Unknown";
       if (labelNameMap.find(label) != labelNameMap.end()) {
@@ -175,6 +175,7 @@ void SsdProcessor<Dtype, Qtype>::WriteVisualizeBBox_offline(const vector<cv::Mat
       }
     }
     file.close();
+    LOG(INFO) << "close txt file ...";
 
     stringstream ss;
     string outFile;

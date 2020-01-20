@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -29,7 +29,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #ifdef USE_MLU
 #include <vector>
-
 #include "caffe/layers/mlu_tanh_layer.hpp"
 
 namespace caffe {
@@ -39,7 +38,7 @@ void MLUTanHLayer<Dtype>::Reshape_tensor(const vector<Blob<Dtype>*>& bottom,
                                          const vector<Blob<Dtype>*>& top) {
   CHECK(bottom.size() == 1 && top.size() == 1);
   BaseDataType cpu_dtype = sizeof(Dtype) == 4 ? DT_FLOAT32 : DT_DOUBLE;
-  BaseDataType mlu_dtype = DT_FLOAT16;
+  BaseDataType mlu_dtype = bottom[0]->mlu_type();
   top[0]->Reshape(bottom[0]->shape(), cpu_dtype, mlu_dtype, CNML_TENSOR);
 }
 
@@ -62,7 +61,7 @@ template <typename Dtype>
 void MLUTanHLayer<Dtype>::MLUCompileOp() {
   MLU_CHECK(cnmlCompileBaseOp(tanh_active_op_ptr_,
                               Caffe::rt_core(),
-                              Caffe::model_parallel()));
+                              Caffe::core_number()));
 }
 
 template <typename Dtype>
@@ -92,4 +91,3 @@ INSTANTIATE_CLASS(MLUTanHLayer);
 
 }  // namespace caffe
 #endif  // USE_MLU
-

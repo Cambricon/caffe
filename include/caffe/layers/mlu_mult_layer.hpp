@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -32,7 +32,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #ifdef USE_MLU
 
 #include <vector>
-
 #include "caffe/blob.hpp"
 #include "caffe/layers/mult_layer.hpp"
 #include "caffe/proto/caffe.pb.h"
@@ -69,7 +68,7 @@ class MLUMultLayer : public MultLayer<Dtype> {
   virtual void MLUCompileOp() {
       MLU_CHECK(cnmlCompileBaseOp(mlu_op_ptr_,
                                   Caffe::rt_core(),
-                                  Caffe::model_parallel()));
+                                  Caffe::core_number()));
   }
   virtual void Forward_mlu(const vector<Blob<Dtype>*>& bottom,
                            const vector<Blob<Dtype>*>& top);
