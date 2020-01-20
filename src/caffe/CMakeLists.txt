@@ -18,7 +18,6 @@ caffe_pickup_caffe_sources(${PROJECT_SOURCE_DIR})
 if(HAVE_CUDA)
   caffe_cuda_compile(cuda_objs ${cuda})
   list(APPEND srcs ${cuda_objs} ${cuda})
-  message(status "wtfwtf")
 endif()
 
 add_library(caffe ${srcs})
