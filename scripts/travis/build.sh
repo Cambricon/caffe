@@ -17,7 +17,7 @@ echo "Prepare swaps before build."
 free -m
 mkdir ./images
 rm -rf ./images/swap
-dd if=/dev/zero of=./images/swap bs=512 count=1M
+dd if=/dev/zero of=./images/swap bs=1024 count=1M
 sudo -E mkswap ./images/swap
 sudo -E swapon ./images/swap
 echo "After set swap space."
