@@ -2,7 +2,7 @@
 All modification made by Cambricon Corporation: © 2018--2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -262,7 +262,8 @@ void BaseConvolutionLayer<Dtype>::SetMean(const vector<Blob<Dtype>*>& bottom,
   conv_first_ = false;
   ConvolutionParameter convolution_param = this->layer_param().convolution_param();
   BaseDataType cpu_dtype = sizeof(Dtype) == 4 ? DT_FLOAT32 : DT_DOUBLE;
-  BaseDataType mlu_dtype = DT_FLOAT16;
+  BaseDataType mlu_dtype = this->layer_param_.has_top_mlu_dtype() ?
+               this->layer_param_.top_mlu_dtype(): DT_FLOAT16;
   if (convolution_param.has_mean_file()) {
     this->conv_first_ = true;
     string mean_file = convolution_param.mean_file();
@@ -313,7 +314,7 @@ void BaseConvolutionLayer<Dtype>::SetMean(const vector<Blob<Dtype>*>& bottom,
       for (int i = 0; i < bottom[0]->channels(); i++) {
         caffe_set<Dtype>(this->mean_.count() / bottom[0]->channels(),
           this->layer_param().convolution_param().mean_value(i), data);
-      data += this->mean_.count() / bottom[0]->channels();
+        data += this->mean_.count() / bottom[0]->channels();
       }
     } else {
       caffe_set<Dtype>(this->mean_.count(),

@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -126,6 +126,10 @@ namespace caffe {
 #ifdef USE_MLU
 const char* mluGetErrorString(cnmlStatus_t status);
 const char* cnrtGetErrorString(cnrtRet_t status);
+
+const cnmlDataType_t to_cnml_dtype(BaseDataType type);
+const cnrtDataType_t to_cnrt_dtype(BaseDataType type);
+const char* to_str_dtype(BaseDataType type);
 #endif
 
 #ifdef USE_CUDA

@@ -2,7 +2,7 @@
 All modification made by Cambricon Corporation: © 2018--2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -36,11 +36,13 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <sstream>
 #include <string>
 #include <vector>
+#include "caffe/mlu/data_trans.hpp"
 
 using std::string;
 using std::vector;
 
 DEFINE_int32(mludevice, 0, "set using mlu device number, default: 0");
+DEFINE_int32(apiversion, 2, "specify the version of CNRT to run.");
 
 void rand1(float* data, int length) {
   unsigned int seed = 1024;
@@ -90,6 +92,8 @@ int main(int argc, char* argv[]) {
   } else {
     LOG(FATAL) << "Invalid device number";
   }
+  CHECK_LE(FLAGS_apiversion, 2) << "The version number should be 1 or 2";
+  CHECK_GE(FLAGS_apiversion, 1) << "The version number should be 1 or 2";
 
   cnrtDev_t dev;
   cnrtGetDeviceHandle(&dev, FLAGS_mludevice);
@@ -100,24 +104,6 @@ int main(int argc, char* argv[]) {
   LOG(INFO) << "load file: " << fname;
   cnrtLoadModel(&model, fname.c_str());
   cnrtFunction_t function;
-  unsigned int in_n, in_c, in_h, in_w;
-  unsigned int out_n, out_c, out_h, out_w;
-  const unsigned int BATCH_1 = 1;
-  unsigned int affinity = 0x01;
-  int data_parallel = 1;
-  cnrtInitFuncParam_t initFuncParam;
-  bool muta = false;
-  int dp = data_parallel;
-  initFuncParam.muta = &muta;
-  initFuncParam.data_parallelism = &dp;
-  initFuncParam.affinity = &affinity;
-  initFuncParam.end = CNRT_PARAM_END;
-
-  cnrtDim3_t dim = {1, 1, 1};
-  cnrtInvokeFuncParam_t invokeFuncParam;
-  invokeFuncParam.data_parallelism = &dp;
-  invokeFuncParam.affinity = &affinity;
-  invokeFuncParam.end = CNRT_PARAM_END;
 
   struct timeval tpend, tpstart;
   gettimeofday(&tpstart, NULL);
@@ -126,97 +112,116 @@ int main(int argc, char* argv[]) {
     string name = (string)argv[n];
     cnrtCreateFunction(&function);
     cnrtExtractFunction(&function, model, name.c_str());
-    // initialize function memory
-    cnrtInitFunctionMemory_V2(function, &initFuncParam);
     // 3. get function's I/O DataDesc
     int inputNum, outputNum;
-    cnrtDataDescArray_t inputDescS, outputDescS;
-    cnrtGetInputDataDesc(&inputDescS, &inputNum, function);
-    cnrtGetOutputDataDesc(&outputDescS, &outputNum, function);
-#if !defined(CROSS_COMPILE) && !defined(CROSS_COMPILE_ARM64)
-    uint64_t stack_size;
-    cnrtQueryModelStackSize(model, &stack_size);
-    unsigned int current_device_size;
-    cnrtGetStackMem(&current_device_size);
-    if (stack_size > current_device_size) {
-      cnrtSetStackMem(stack_size + 50);
-    }
-#endif  // CROSS_COMPILE && CROSS_COMPILE_ARM64
+    int64_t* inputSizeArray;
+    int64_t* outputSizeArray;
+    cnrtDataType_t* inputDataTypeArray;
+    cnrtDataType_t* outputDataTypeArray;
+    CNRT_CHECK(cnrtGetInputDataSize(&inputSizeArray, &inputNum, function));
+    CNRT_CHECK(cnrtGetOutputDataSize(&outputSizeArray, &outputNum, function));
+    CNRT_CHECK(cnrtGetInputDataType(&inputDataTypeArray, &inputNum, function));
+    CNRT_CHECK(cnrtGetOutputDataType(&outputDataTypeArray, &outputNum, function));
+
     // 4. allocate I/O data space on CPU memory and prepare Input data
     void** inputCpuPtrS = reinterpret_cast<void**>(malloc(sizeof(void*) * inputNum));
+    void** inputSyncPtrS = reinterpret_cast<void**>(malloc(sizeof(void*) * inputNum));
+    void** inputSyncTmpPtrS = reinterpret_cast<void**>(malloc(sizeof(void*) * inputNum));
     void** outputCpuPtrS = reinterpret_cast<void**>(malloc(sizeof(void*) * outputNum));
+    void** outputSyncPtrS = reinterpret_cast<void**>(malloc(sizeof(void*) * outputNum));
     vector<float*> output_cpu;
     vector<int> in_count;
     vector<int> out_count;
+    vector<vector<int>> inputShape;
+    vector<vector<int>> outputShape;
     void** param =
         reinterpret_cast<void**>(malloc(sizeof(void*) * (inputNum + outputNum)));
     srand(10);
+    float* outcpu;
+    float* databuf;
+    vector<int*> inputDimValues(inputNum, 0);
+    vector<int> inputDimNumS(inputNum, 0);
+    vector<int*> outputDimValues(outputNum, 0);
+    vector<int> outputDimNumS(outputNum, 0);
     for (int i = 0; i < inputNum; i++) {
-      int ip;
-      float* databuf;
-      cnrtDataDesc_t inputDesc = inputDescS[i];
-      cnrtSetHostDataLayout(inputDesc, CNRT_FLOAT32, CNRT_NCHW);
-      cnrtGetHostDataCount(inputDesc, &ip);
-      databuf = reinterpret_cast<float*>(malloc(sizeof(float) * ip));
+      databuf = reinterpret_cast<float*>(malloc(sizeof(float) * inputSizeArray[i]));
       if (i == 0) {
-        rand1(databuf, ip);
+        rand1(databuf, inputSizeArray[i]);
       } else {
-        rand2(databuf, ip);
+        rand2(databuf, inputSizeArray[i]);
       }
-      in_count.push_back(ip);
+      in_count.push_back(inputSizeArray[i]);
       inputCpuPtrS[i] = reinterpret_cast<void*>(databuf);
-      cnrtGetDataShape(inputDesc, &in_n, &in_c, &in_h, &in_w);
+      inputSyncPtrS[i] = reinterpret_cast<void*>(malloc(inputSizeArray[i]));
+      inputSyncTmpPtrS[i] = reinterpret_cast<void*>(malloc(inputSizeArray[i] / 4 * 3));
+      cnrtGetInputDataShape(&(inputDimValues[i]), &(inputDimNumS[i]), i, function);
+      vector<int> in_shape;
+      for (int idx = 0; idx < inputDimNumS[i]; idx++) {
+        in_shape.push_back(inputDimValues[i][idx]);
+      }
+      inputShape.push_back(in_shape);
     }
     for (int i = 0; i < outputNum; i++) {
-      int op;
-      float* outcpu;
-      cnrtDataDesc_t outputDesc = outputDescS[i];
-      cnrtSetHostDataLayout(outputDesc, CNRT_FLOAT32, CNRT_NCHW);
-      cnrtGetHostDataCount(outputDesc, &op);
-      outcpu = reinterpret_cast<float*>(malloc(op * sizeof(float)));
-      out_count.push_back(op);
+      int outDataCount = 1;
+      cnrtGetOutputDataShape(&(outputDimValues[i]), &(outputDimNumS[i]), i, function);
+      vector<int> out_shape;
+      for (int idx = 0; idx < outputDimNumS[i]; idx++) {
+        outDataCount = outDataCount * outputDimValues[i][idx];
+        out_shape.push_back(outputDimValues[i][idx]);
+      }
+      outputShape.push_back(out_shape);
+      outcpu = reinterpret_cast<float*>(malloc(outDataCount * sizeof(float)));
+      out_count.push_back(outDataCount);
       output_cpu.push_back(outcpu);
       outputCpuPtrS[i] = reinterpret_cast<void*>(outcpu);
-      cnrtGetDataShape(outputDesc, &out_n, &out_c, &out_h, &out_w);
-      LOG(INFO) << "out_n " << out_n << " out_c " << out_c << " out_h " << out_h
-                << " out_w " << out_w;
+      outputSyncPtrS[i] =
+          reinterpret_cast<void*>(malloc(outputSizeArray[i]));
     }
     // 5. allocate I/O data space on MLU memory and copy Input data
     // Only 1 batch so far
-    void** inputMluPtrS;
-    void** outputMluPtrS;
-    cnrtMallocBatchByDescArray(&inputMluPtrS, inputDescS, inputNum, BATCH_1);
-    cnrtMallocBatchByDescArray(&outputMluPtrS, outputDescS, outputNum, BATCH_1);
+    void** inputMluPtrS = reinterpret_cast<void**>(malloc(sizeof(void*) * inputNum));
+    void** outputMluPtrS = reinterpret_cast<void**>(malloc(sizeof(void*) * outputNum));
     for (int i = 0; i < inputNum; i++) {
+      cnrtMalloc(&(inputMluPtrS[i]), inputSizeArray[i]);
       param[i] = inputMluPtrS[i];
     }
     for (int i = 0; i < outputNum; i++) {
+      cnrtMalloc(&(outputMluPtrS[i]), outputSizeArray[i]);
       param[inputNum + i] = outputMluPtrS[i];
     }
-    // 6. create queue and run function
+    // 6. create cnrt_queue and run function
     cnrtQueue_t cnrt_queue;
     cnrtCreateQueue(&cnrt_queue);
-    // initialize function memory, should be called
-    // once before cnrtInvokeFunction
-    cnrtInitFunctionMemory_V2(function, &initFuncParam);
-    cnrtMemcpyBatchByDescArray(
-        inputMluPtrS,
-        inputCpuPtrS,
-        inputDescS,
-        inputNum,
-        BATCH_1,
-        CNRT_MEM_TRANS_DIR_HOST2DEV);
+    cnrtRuntimeContext_t rt_ctx;
+    if (cnrtCreateRuntimeContext(&rt_ctx, function, nullptr) != CNRT_RET_SUCCESS) {
+      LOG(FATAL)<< "Failed to create runtime context";
+    }
+    cnrtSetRuntimeContextDeviceId(rt_ctx, FLAGS_mludevice);
+    cnrtInitRuntimeContext(rt_ctx, NULL);
+    cnrtDataType_t inputCpuDtype = CNRT_FLOAT32;
+    cnrtDataType_t inputMluDtype = inputDataTypeArray[0];
+
+    for (int i = 0; i < inputNum; i++) {
+      bool useFirstConv = inputMluDtype == CNRT_UINT8 && inputShape[i][3] == 4;
+      caffe::transAndCast(reinterpret_cast<void*>(inputCpuPtrS[i]), inputCpuDtype,
+                   reinterpret_cast<void*>(inputSyncPtrS[i]), inputMluDtype,
+                   reinterpret_cast<void*>(inputSyncTmpPtrS[i]),
+                   caffe::to_cpu_shape(inputShape[i]),
+                   useFirstConv, "CPU2MLU");
+
+      CNRT_CHECK(cnrtMemcpy(inputMluPtrS[i], inputSyncPtrS[i],
+            inputSizeArray[i], CNRT_MEM_TRANS_DIR_HOST2DEV));
+    }
     // create start_event and end_event
     cnrtNotifier_t notifierBeginning, notifierEnd;
     cnrtCreateNotifier(&notifierBeginning);
     cnrtCreateNotifier(&notifierEnd);
     float event_time_use;
     // run MLU
-    // place start_event to queue 
+    // place start_event to cnrt_queue
     cnrtPlaceNotifier(notifierBeginning, cnrt_queue);
-    CNRT_CHECK(cnrtInvokeFunction_V2(function, dim,
-          param, (cnrtFunctionType_t)0, cnrt_queue, &invokeFuncParam));
-    // place end_event to cnrt_queue 
+    CNRT_CHECK(cnrtInvokeRuntimeContext(rt_ctx, param, cnrt_queue, nullptr));
+    // place end_event to cnrt_queue
     cnrtPlaceNotifier(notifierEnd, cnrt_queue);
     if (cnrtSyncQueue(cnrt_queue) == CNRT_RET_SUCCESS) {
       // get start_event and end_event elapsed time
@@ -227,13 +232,20 @@ int main(int argc, char* argv[]) {
     } else {
       LOG(INFO) << " SyncQueue Error ";
     }
-    cnrtMemcpyBatchByDescArray(
-        outputCpuPtrS,
-        outputMluPtrS,
-        outputDescS,
-        outputNum,
-        BATCH_1,
-        CNRT_MEM_TRANS_DIR_DEV2HOST);
+    cnrtDataType_t outputCpuDtype = CNRT_FLOAT32;
+    cnrtDataType_t outputMluDtype = outputDataTypeArray[0];
+    for (int i = 0; i < outputNum; i++) {
+      CNRT_CHECK(cnrtMemcpy(outputSyncPtrS[i], outputMluPtrS[i],
+            outputSizeArray[i], CNRT_MEM_TRANS_DIR_DEV2HOST));
+      caffe::transAndCast(reinterpret_cast<void*>(outputSyncPtrS[i]),
+                   outputMluDtype,
+                   reinterpret_cast<void*>(outputCpuPtrS[i]),
+                   outputCpuDtype,
+                   nullptr,
+                   outputShape[i],
+                   false,
+                   "MLU2CPU");
+    }
     for (int i = 0; i < outputNum; i++) {
       LOG(INFO) << "copying output data of " << i << "th" << " function: " << argv[n];
       std::stringstream ss;
@@ -260,10 +272,14 @@ int main(int argc, char* argv[]) {
     // 8. free memory space
     free(inputCpuPtrS);
     free(outputCpuPtrS);
+    free(inputSyncPtrS);
+    free(inputSyncTmpPtrS);
+    free(outputSyncPtrS);
     cnrtFreeArray(inputMluPtrS, inputNum);
     cnrtFreeArray(outputMluPtrS, outputNum);
     cnrtDestroyQueue(cnrt_queue);
     cnrtDestroyFunction(function);
+    cnrtDestroyRuntimeContext(rt_ctx);
   }
   cnrtUnloadModel(model);
   gettimeofday(&tpend, NULL);

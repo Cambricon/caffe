@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -45,14 +45,14 @@ namespace caffe {
  */
 template <typename Dtype>
 class ReverseLayer: public NeuronLayer<Dtype> {
- public:
+  public:
   explicit ReverseLayer(const LayerParameter& param)
       : NeuronLayer<Dtype>(param) {}
 
   virtual inline const char* type() const { return "Reverse"; }
   virtual inline int ExactNumBottomBlobs() const { return 1;}
 
- protected:
+  protected:
   virtual void Forward_cpu(const vector<Blob<Dtype>*>& bottom,
                            const vector<Blob<Dtype>*>& top);
   virtual void Backward_cpu(const vector<Blob<Dtype>*>& top,

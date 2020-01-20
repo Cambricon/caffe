@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -32,11 +32,9 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #ifdef USE_MLU
 
 #include <vector>
-
 #include "caffe/blob.hpp"
 #include "caffe/layer.hpp"
 #include "caffe/proto/caffe.pb.h"
-
 #include "caffe/layers/inner_product_layer.hpp"
 /**
  * @brief Also known as a "fully-connected" layer, computes an inner product
@@ -57,16 +55,29 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 namespace caffe {
+
 template <typename Dtype>
 class MLUInnerProductLayer : public InnerProductLayer<Dtype> {
   public:
   explicit MLUInnerProductLayer(const LayerParameter& param)
-      : InnerProductLayer<Dtype>(param), mlp_op_ptr_(nullptr) {}
+      : InnerProductLayer<Dtype>(param), mlp_op_ptr_(nullptr),
+      input_quant_param_(nullptr),
+      reshape_op_ptr_(nullptr),
+      reshape_param_(nullptr),
+      reshape_(false),
+      transpose_op_param_ptr_(nullptr),
+      transpose_pro_op_ptr_(nullptr) {}
   virtual void LayerSetUp(const vector<Blob<Dtype>*>& bottom,
                           const vector<Blob<Dtype>*>& top);
   virtual ~MLUInnerProductLayer();
   virtual inline bool mfus_supported() { return true; }
-  virtual void fuse(MFusion<Dtype>* fuser) { fuser->fuse(mlp_op_ptr_); }
+  virtual void fuse(MFusion<Dtype>* fuser) {
+    if (reshape_) {
+      fuser->fuse(reshape_op_ptr_);
+      fuser->fuse(transpose_pro_op_ptr_);
+    }
+    fuser->fuse(mlp_op_ptr_);
+  }
   virtual void Reshape_tensor(const vector<Blob<Dtype>*>& bottom,
                            const vector<Blob<Dtype>*>& top);
   protected:
@@ -76,8 +87,17 @@ class MLUInnerProductLayer : public InnerProductLayer<Dtype> {
   virtual void MLUCreateOpBindData(const vector<Blob<Dtype>*>& bottom,
                                    const vector<Blob<Dtype>*>& top);
   virtual void MLUCompileOp();
+  void bindDataAndSetComputingDataType(shared_ptr<Blob<Dtype>> blob,
+                                 cnmlBaseOp_t op, BaseDataType type);
   cnmlBaseOp_t mlp_op_ptr_;
-  cnmlSparseMode_t mluSparse_;
+  cnmlQuantizedParam_t input_quant_param_;
+  cnmlBaseOp_t reshape_op_ptr_;
+  cnmlReshapeOpParam_t reshape_param_;
+  Blob<Dtype> reshape;
+  bool reshape_;
+  cnmlNdTransposeOpParam_t transpose_op_param_ptr_;
+  cnmlBaseOp_t transpose_pro_op_ptr_;
+  Blob<Dtype> transpose;
 };
 }  // namespace caffe
 

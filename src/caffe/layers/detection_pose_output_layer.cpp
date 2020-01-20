@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -460,6 +460,7 @@ void DetectionPoseOutputLayer<Dtype>::Forward_cpu(
           std::ofstream outfile;
           outfile.open(out_file.string().c_str(), std::ofstream::out);
 
+#if not defined CROSS_COMPILE && not defined CROSS_COMPILE_ARM64
           boost::regex exp("\"(null|true|false|-?[0-9]+(\\.[0-9]+)?)\"");
           boost::property_tree::ptree output;
           output.add_child("detections", detections_);
@@ -468,6 +469,9 @@ void DetectionPoseOutputLayer<Dtype>::Forward_cpu(
           std::string rv = boost::regex_replace(ss.str(), exp, "$1");
           outfile << rv.substr(rv.find("["), rv.rfind("]") - rv.find("["))
               << std::endl << "]" << std::endl;
+#else
+          LOG(FATAL) << "Output types are not supported.";
+#endif
         }
       }
       if (name_count_ == names_.size()) {

@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -39,8 +39,9 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 namespace caffe {
 
 /**
- * @brief bottom[0] + bottom[1] => top[0]
- *    bottom[0] and bottom[1] should in same shape.
+ * @brief MLU acceleration of AddLayer
+ *        AddLayer computes bottom[0] + bottom[1] => top[0]
+ *        bottom[0] and bottom[1] should in same shape.
  * @param No param.
  */
 template <typename Dtype>
@@ -54,18 +55,13 @@ class MLUAddLayer : public AddLayer<Dtype> {
                               const vector<Blob<Dtype>*>& top);
   virtual void fuse(MFusion<Dtype>* fuser);
   virtual ~MLUAddLayer();
-
   virtual inline bool mfus_supported() { return true; }
 
  protected:
   virtual void MLUDestroyOp();
   virtual void MLUCreateOpBindData(const vector<Blob<Dtype>*>& bottom,
                                    const vector<Blob<Dtype>*>& top);
-  virtual void MLUCompileOp() {
-    MLU_CHECK(cnmlCompileBaseOp(add_op_ptr_,
-                                Caffe::rt_core(),
-                                Caffe::model_parallel()));
-  }
+  virtual void MLUCompileOp();
   virtual void Forward_mlu(const vector<Blob<Dtype>*>& bottom,
                            const vector<Blob<Dtype>*>& top);
   cnmlBaseOp_t add_op_ptr_;

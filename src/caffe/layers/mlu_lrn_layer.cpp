@@ -2,7 +2,7 @@
 All modification made by Cambricon Corporation: © 2018--2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -55,7 +55,7 @@ void MLULRNLayer<Dtype>::Reshape_tensor(const vector<Blob<Dtype>*>& bottom,
   this->width_ = bottom[0]->width();
 
   BaseDataType cpu_dtype = sizeof(Dtype) == 4 ? DT_FLOAT32 : DT_DOUBLE;
-  BaseDataType mlu_dtype = DT_FLOAT16;
+  BaseDataType mlu_dtype = bottom[0]->mlu_type();
   switch (this->layer_param_.lrn_param().norm_region()) {
   case LRNParameter_NormRegion_ACROSS_CHANNELS:
     top[0]->Reshape(this->num_, this->channels_, this->height_,
@@ -97,8 +97,8 @@ void MLULRNLayer<Dtype>::Reshape_tensor(const vector<Blob<Dtype>*>& bottom,
     // power blob
     vector<int> alpha_beta_shape(4, 1);
     alpha_beta_shape[1] = this->channels_;
-    alpha_blob_.Reshape(alpha_beta_shape, cpu_dtype, DT_FLOAT16, CNML_CONST);
-    beta_blob_.Reshape(alpha_beta_shape, cpu_dtype, DT_FLOAT16, CNML_CONST);
+    alpha_blob_.Reshape(alpha_beta_shape, cpu_dtype, mlu_dtype, CNML_CONST);
+    beta_blob_.Reshape(alpha_beta_shape, cpu_dtype, mlu_dtype, CNML_CONST);
     temp_blob_.Reshape(blob_shape, cpu_dtype, mlu_dtype, CNML_TENSOR);
     power_blob_.Reshape(blob_shape, cpu_dtype, mlu_dtype, CNML_TENSOR);
     break;
@@ -116,6 +116,14 @@ void MLULRNLayer<Dtype>::MLUDestroyOp() {
     if (mlu_lrn_param_ptr_ != nullptr) {
       MLU_CHECK(cnmlDestroyLrnOpParam(&mlu_lrn_param_ptr_));
       mlu_lrn_param_ptr_ = nullptr;
+    }
+    if (input_quant_params != nullptr) {
+      MLU_CHECK(cnmlDestroyQuantizedParam(&input_quant_params));
+      input_quant_params = nullptr;
+    }
+    if (output_quant_params != nullptr) {
+      MLU_CHECK(cnmlDestroyQuantizedParam(&output_quant_params));
+      output_quant_params = nullptr;
     }
     break;
   case LRNParameter_NormRegion_WITHIN_CHANNEL:
@@ -179,34 +187,34 @@ void MLULRNLayer<Dtype>::MLUCompileOp() {
   case LRNParameter_NormRegion_ACROSS_CHANNELS:
     MLU_CHECK(cnmlCompileBaseOp(mlu_lrn_op_ptr_,
                                 Caffe::rt_core(),
-                                Caffe::model_parallel()));
+                                Caffe::core_number()));
     break;
   case LRNParameter_NormRegion_WITHIN_CHANNEL:
     MLU_CHECK(cnmlCompileBaseOp(mlu_scale1_op_ptr_,
                                 Caffe::rt_core(),
-                                Caffe::model_parallel()));
+                                Caffe::core_number()));
     MLU_CHECK(cnmlCompileBaseOp(mlu_square_op_ptr_,
                                 Caffe::rt_core(),
-                                Caffe::model_parallel()));
+                                Caffe::core_number()));
     if (this->pre_pad_) {
       MLU_CHECK(cnmlCompileBaseOp(mlu_addpad_op_ptr_,
                                   Caffe::rt_core(),
-                                  Caffe::model_parallel()));
+                                  Caffe::core_number()));
     }
     MLU_CHECK(cnmlCompileBaseOp(mlu_pool_op_ptr_,
                                 Caffe::rt_core(),
-                                Caffe::model_parallel()));
+                                Caffe::core_number()));
     MLU_CHECK(cnmlCompileBaseOp(mlu_scale_op_ptr_,
                                 Caffe::rt_core(),
-                                Caffe::model_parallel()));
+                                Caffe::core_number()));
     if ((-this->beta_) != 1) {
       MLU_CHECK(cnmlCompileBaseOp(mlu_power_op_ptr_,
                                   Caffe::rt_core(),
-                                  Caffe::model_parallel()));
+                                  Caffe::core_number()));
     }
     MLU_CHECK(cnmlCompileBaseOp(mlu_product_op_ptr_,
                                 Caffe::rt_core(),
-                                Caffe::model_parallel()));
+                                Caffe::core_number()));
     break;
   }
 }
@@ -217,7 +225,7 @@ void MLULRNLayer<Dtype>::MLUCreateOpBindData(const vector<Blob<Dtype>*>& bottom,
   switch (this->layer_param_.lrn_param().norm_region()) {
   case LRNParameter_NormRegion_ACROSS_CHANNELS:
     MLU_CHECK(cnmlCreateLrnOpParam(&mlu_lrn_param_ptr_,
-                                CNML_LRN_V1,
+                                CNML_LRN_V3,
                                 this->size_,
                                 this->alpha_,
                                 this->beta_,
@@ -230,10 +238,23 @@ void MLULRNLayer<Dtype>::MLUCreateOpBindData(const vector<Blob<Dtype>*>& bottom,
         this->layer_param_.bottom_mlu_dtype(0).position_size()) {
           bottom[0]->set_mlu_position(
               this->layer_param_.bottom_mlu_dtype(0).position(0));
-          cnmlEnableLrnOpInt8Mode(mlu_lrn_op_ptr_,
-                                  bottom[0]->mlu_position(),
-                                  0);
+          double scale = this->layer_param_.bottom_mlu_dtype(0).scale(0);
+          bottom[0]->set_mlu_scale(scale);
+          MLU_CHECK(cnmlCreateQuantizedParam(&input_quant_params,
+                this->layer_param_.bottom_mlu_dtype(0).position(0),
+                scale,
+                0.0));
+          MLU_CHECK(cnmlSetOperationComputingDataType(mlu_lrn_op_ptr_,
+                  bottom[0]->mlu_tensor(),
+                  to_cnml_dtype(this->layer_param_.bottom_mlu_dtype(0).type()),
+                  input_quant_params));
     }
+
+    MLU_CHECK(cnmlCreateQuantizedParam(&output_quant_params, 1, 1.0, 0.0));
+    MLU_CHECK(cnmlSetOperationComputingDataType(mlu_lrn_op_ptr_,
+            top[0]->mlu_tensor(),
+            to_cnml_dtype(bottom[0]->mlu_type()),
+            output_quant_params));
     break;
   case LRNParameter_NormRegion_WITHIN_CHANNEL:
 
@@ -242,13 +263,13 @@ void MLULRNLayer<Dtype>::MLUCreateOpBindData(const vector<Blob<Dtype>*>& bottom,
                                  scale_blob_.mlu_tensor(),
                                  alpha1_blob_.mlu_tensor(),
                                  beta1_blob_.mlu_tensor()));
-     MLU_CHECK(cnmlBindConstData(alpha1_blob_.mlu_tensor(),
-                                 alpha1_blob_.cpu_tensor(),
-                                 alpha1_blob_.mutable_cpu_data()));
+     MLU_CHECK(cnmlBindConstData_V2(alpha1_blob_.mlu_tensor(),
+                                 alpha1_blob_.sync_data(),
+                                 false));
 
-     MLU_CHECK(cnmlBindConstData(beta1_blob_.mlu_tensor(),
-                                 beta1_blob_.cpu_tensor(),
-                                 beta1_blob_.mutable_cpu_data()));
+     MLU_CHECK(cnmlBindConstData_V2(beta1_blob_.mlu_tensor(),
+                                 beta1_blob_.sync_data(),
+                                 false));
 
 
     // square op
@@ -282,44 +303,44 @@ void MLULRNLayer<Dtype>::MLUCreateOpBindData(const vector<Blob<Dtype>*>& bottom,
                                     CNML_POOL_KFULL,
                                     false));
 
-     MLU_CHECK(cnmlCreatePoolOp(&mlu_pool_op_ptr_,
-                                pool_param_ptr_,
-                                mlu_addpad_op_ptr_?
-                                addpad_blob_.mlu_tensor():
-                                square_blob_.mlu_tensor(),
-                                pool_blob_.mlu_tensor()));
-     // power
-     for (int i = 0; i < alpha_blob_.count(); i++) {
-       alpha_blob_.mutable_cpu_data()[i] = this->alpha_ * 10000;
-     }
-     for (int i = 0; i < beta_blob_.count(); i++) {
-       beta_blob_.mutable_cpu_data()[i] = 1;
-     }
-     MLU_CHECK(cnmlCreateScaleOp(&mlu_scale_op_ptr_,
-                                 pool_blob_.mlu_tensor(),
-                                 (-this->beta_) == 1 ?
-                                 power_blob_.mlu_tensor():
-                                 temp_blob_.mlu_tensor(),
-                                 alpha_blob_.mlu_tensor(),
-                                 beta_blob_.mlu_tensor()));
-     MLU_CHECK(cnmlBindConstData(alpha_blob_.mlu_tensor(),
-                                 alpha_blob_.cpu_tensor(),
-                                 alpha_blob_.mutable_cpu_data()));
-     MLU_CHECK(cnmlBindConstData(beta_blob_.mlu_tensor(),
-                                 beta_blob_.cpu_tensor(),
-                                 beta_blob_.mutable_cpu_data()));
-     if ((-this->beta_) != 1) {
-       MLU_CHECK(cnmlCreatePowerOp(&mlu_power_op_ptr_,
-                                   temp_blob_.mlu_tensor(),
-                                   power_blob_.mlu_tensor(),
-                                   (-this->beta_)));
-     }
+    MLU_CHECK(cnmlCreatePoolOp(&mlu_pool_op_ptr_,
+                               pool_param_ptr_,
+                               mlu_addpad_op_ptr_?
+                               addpad_blob_.mlu_tensor():
+                               square_blob_.mlu_tensor(),
+                               pool_blob_.mlu_tensor()));
+    // power
+    for (int i = 0; i < alpha_blob_.count(); i++) {
+      alpha_blob_.mutable_cpu_data()[i] = this->alpha_ * 10000;
+    }
+    for (int i = 0; i < beta_blob_.count(); i++) {
+      beta_blob_.mutable_cpu_data()[i] = 1;
+    }
+    MLU_CHECK(cnmlCreateScaleOp(&mlu_scale_op_ptr_,
+                                pool_blob_.mlu_tensor(),
+                                (-this->beta_) == 1 ?
+                                power_blob_.mlu_tensor():
+                                temp_blob_.mlu_tensor(),
+                                alpha_blob_.mlu_tensor(),
+                                beta_blob_.mlu_tensor()));
+    MLU_CHECK(cnmlBindConstData_V2(alpha_blob_.mlu_tensor(),
+                                alpha_blob_.sync_data(),
+                                false));
+    MLU_CHECK(cnmlBindConstData_V2(beta_blob_.mlu_tensor(),
+                                beta_blob_.sync_data(),
+                                false));
+    if ((-this->beta_) != 1) {
+      MLU_CHECK(cnmlCreatePowerOp(&mlu_power_op_ptr_,
+                                  temp_blob_.mlu_tensor(),
+                                  power_blob_.mlu_tensor(),
+                                  (-this->beta_)));
+    }
 
-     // product
-     MLU_CHECK(cnmlCreateMultOp(&mlu_product_op_ptr_,
-                                bottom[0]->mlu_tensor(),
-                                power_blob_.mlu_tensor(),
-                                top[0]->mlu_tensor()));
+    // product
+    MLU_CHECK(cnmlCreateMultOp(&mlu_product_op_ptr_,
+                               bottom[0]->mlu_tensor(),
+                               power_blob_.mlu_tensor(),
+                               top[0]->mlu_tensor()));
     break;
   }
 }

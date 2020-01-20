@@ -2,7 +2,7 @@
 All modification made by Cambricon Corporation: © 2018--2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -58,6 +58,7 @@ using caffe::shared_ptr;
 using caffe::string;
 using caffe::Timer;
 using caffe::vector;
+using caffe::NetParameter;
 using std::ostringstream;
 using std::ofstream;
 using std::stringstream;
@@ -77,10 +78,9 @@ DEFINE_string(mreshape, "SETUPONLY",
     "            Note: DETECT is under *alpha* version not recomended");
 DEFINE_string(mname, "offline",
     "The name for the offline model to be generated.");
-DEFINE_int32(model_parallel, 1,
-    "model parallel means one model runs in multicores");
-DEFINE_int32(data_parallel, 1,
-    "data_parallel means one data has multiple same models");
+DEFINE_int32(batchsize, 1, "Read images size every batch for inference");
+DEFINE_int32(core_number, 1, "The number of cores are used for inference");
+DEFINE_int32(simple_compile, 0, "Use simple compile interface or not");
 DEFINE_string(mcore, "",
     "Which core version you want to generate");
 DEFINE_string(solver, "", "The solver definition protocol buffer text file.");
@@ -97,7 +97,6 @@ DEFINE_string(weights, "",
               "Optional; the pretrained weights to initialize finetuning, "
               "separated by ','. Cannot be set simultaneously with snapshot.");
 DEFINE_int32(iterations, 50, "The number of iterations to run.");
-DEFINE_int32(hd_reshape, 0, "Use hardware reshape or not");
 DEFINE_string(sigint_effect, "stop",
               "Optional; action to take when a SIGINT signal is received: "
               "snapshot, stop or none.");
@@ -105,13 +104,13 @@ DEFINE_string(sighup_effect, "snapshot",
               "Optional; action to take when a SIGHUP signal is received: "
               "snapshot, stop or none.");
 DEFINE_int32(cpu_info, 0, "1: add cpu seg info into offlinemodel file, 0: no");
-DEFINE_string(datastrategy, "-1,-1",
-              "Use it to control input and output data_strategy"
-              " 0: cpu_mlu_balance; 1: cpu_priority; "
-              " 2: mlu_priority;    3: no_preprocess ");
+DEFINE_int32(Bangop, 0, "Use Bang Operator or not");
 DEFINE_string(dataorder, "0,0",
               "Use it to control input and output dataorder"
               " 0: NCHW; 1: NHWC; ");
+DEFINE_string(output_dtype, "INVALID",
+    "Specifies the type of output in the middle of the model.");
+DEFINE_int32(opt_level, 1, "Optimized the model.");
 
 // A simple registry for caffe commands.
 typedef int (*BrewFunction)();
@@ -316,13 +315,12 @@ static inline void parse_mlu_device_args() {
   cnmlInit(0);
   libInit = true;
   Caffe::set_mlu_device(FLAGS_mludevice);
-  if (FLAGS_data_parallel * FLAGS_model_parallel > 32) {
-    LOG(WARNING) << "data_parallel * model_parallel is greater than 32 ";
-    LOG(WARNING) << "both data_parallel and model_parallel are set to 1 ";
-    FLAGS_data_parallel = FLAGS_model_parallel = 1;
+  if (FLAGS_core_number > 32) {
+    LOG(WARNING) << "core number is greater than 32 ";
+    FLAGS_core_number = 32;
   }
-  Caffe::setDataParallel(FLAGS_data_parallel);
-  Caffe::setModelParallel(FLAGS_model_parallel);
+  Caffe::setDetectOpMode(FLAGS_Bangop);
+  Caffe::setCoreNumber(FLAGS_core_number);
   Caffe::set_rt_core(FLAGS_mcore);
 }
 
@@ -336,16 +334,6 @@ void parse_mlu_args_for_test() {
   parse_mlu_device_args();
   Caffe::setReshapeMode(FLAGS_mreshape);
   Caffe::set_mode(FLAGS_mmode);
-
-  stringstream ss(FLAGS_datastrategy);
-  vector<int> strategy;
-  string value;
-  while (getline(ss, value, ',')) {
-    strategy.push_back(std::atoi(value.c_str()));
-  }
-  if (strategy[0] != -1 || strategy[1] != -1) {
-    Caffe::setDataStrategy(strategy);
-  }
 }
 #endif  // USE_MLU
 
@@ -445,9 +433,25 @@ int genoff() {
   Caffe::set_rt_core(FLAGS_mcore);
   Caffe::set_mode(Caffe::MFUS);
   Caffe::setReshapeMode(Caffe::ReshapeMode::SETUPONLY);
+  Caffe::setDetectOpMode(FLAGS_Bangop);
+  if (FLAGS_output_dtype != "INVALID")
+    caffe::Caffe::setTopDataType(FLAGS_output_dtype);
   CHECK_NE(FLAGS_weights.size(), 0) << "weights must be provided!";
 
-  Net<float> net(FLAGS_model, caffe::TEST);
+  if (FLAGS_simple_compile) {
+    if (FLAGS_core_number >= 1 && FLAGS_core_number <= 32) {
+      Caffe::setBatchsize(FLAGS_batchsize);
+      Caffe::setCoreNumber(FLAGS_core_number);
+      Caffe::setSimpleFlag(true);
+    } else {
+      LOG(FATAL) << "core_number ranges from 1 to 32.";
+    }
+  }
+  NetParameter param;
+  ReadNetParamsFromTextFileOrDie(FLAGS_model, &param);
+  param.mutable_state()->set_phase(caffe::TEST);
+  param.set_opt_level(FLAGS_opt_level);
+  caffe::Net<float> net(param);
   net.CopyTrainedLayersFrom(FLAGS_weights);
 
   // Fill in the value of im_info in prototxt.
@@ -462,24 +466,7 @@ int genoff() {
     im_info_data[2] = 1;
   }
 
-  int model_parallel = 1;
-  if (FLAGS_model_parallel >= 1 && FLAGS_model_parallel <= 32) {
-    model_parallel = FLAGS_model_parallel;
-  } else {
-    LOG(FATAL) << "model_parallel ranges from 1 to 32.";
-  }
-  hardwareReshape_t hd_reshape = hardware_reshape_close;
-  if (FLAGS_hd_reshape == 2) {
-    hd_reshape = hardware_reshape_NCHW;
-  } else if (FLAGS_hd_reshape == 3) {
-    hd_reshape = hardware_reshape_NHWC;
-  }
-  stringstream ss(FLAGS_datastrategy);
-  vector<int> strategy;
   string value;
-  while (getline(ss, value, ',')) {
-    strategy.push_back(std::atoi(value.c_str()));
-  }
   stringstream ss1(FLAGS_dataorder);
   vector<int> dataorder;
   while (getline(ss1, value, ',')) {
@@ -494,12 +481,9 @@ int genoff() {
   if (FLAGS_cpu_info == 1) {
     net.set_cpu_info_flag(true);
   }
-  if (strategy[0] != -1 || strategy[1] != -1) {
-    Caffe::setDataStrategy(strategy);
-  }
   struct timeval tpend, tpstart;
   gettimeofday(&tpstart, NULL);
-  net.genOfflineModel(FLAGS_mname, hd_reshape, model_parallel);
+  net.genOfflineModel(FLAGS_mname);
   gettimeofday(&tpend, NULL);
   float execTime = 1000000 * (tpend.tv_sec - tpstart.tv_sec) +
     tpend.tv_usec - tpstart.tv_usec;

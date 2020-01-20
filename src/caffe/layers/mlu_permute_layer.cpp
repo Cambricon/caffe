@@ -2,7 +2,7 @@
 All modification made by Cambricon Corporation: © 2018--2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -28,9 +28,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
 #ifdef USE_MLU
-
 #include <vector>
-
 #include "caffe/layers/mlu_permute_layer.hpp"
 
 namespace caffe {
@@ -56,30 +54,28 @@ void MLUPermuteLayer<Dtype>::Reshape_tensor(const vector<Blob<Dtype>*>& bottom,
     top_shape.push_back(bottom[0]->shape(this->permute_order_.cpu_data()[i]));
   }
   BaseDataType cpu_dtype = sizeof(Dtype) == 4 ? DT_FLOAT32 : DT_DOUBLE;
-  top[0]->Reshape(top_shape, cpu_dtype, DT_FLOAT16, CNML_TENSOR);
+  BaseDataType mlu_dtype = bottom[0]->mlu_type();
+  top[0]->Reshape(top_shape, cpu_dtype, mlu_dtype, CNML_TENSOR);
 }
 
 template <typename Dtype>
 void MLUPermuteLayer<Dtype>::MLUCreateOpBindData(
     const vector<Blob<Dtype>*>& bottom,
     const vector<Blob<Dtype>*>& top) {
-  const int axis = top[0]->shape().size();
   if (transpose_) {
-    // TransposeOpParam:
-    //   InputOrder should be specified as CNML_NCHW.
-    //   In addition, the input of parameters needs to consider case
-    //   that the input is not 4 dimensional.
-    MLU_CHECK(cnmlCreateTransposeOpParam(&transpose_op_param_ptr_,
-              CNML_NCHW,
-              this->permute_order_.cpu_data()[0],
-              axis > 1 ? this->permute_order_.cpu_data()[1] : 1,
-              axis > 2 ? this->permute_order_.cpu_data()[2] : 2,
-              axis > 3 ? this->permute_order_.cpu_data()[3] : 3));
+    int length = bottom[0]->num_axes();
+    int dim[length];
+    for (int i = 0; i < length; i++) {
+      dim[i] = this->permute_order_.cpu_data()[i];
+    }
+    MLU_CHECK(cnmlCreateNdTransposeOpParam(&transpose_op_param_ptr_,
+                                           dim,
+                                           length));
     /* TransposeProOp */
-    MLU_CHECK(cnmlCreateTransposeProOp(&transpose_pro_op_ptr_,
-                                       bottom[0]->mlu_tensor(),
-                                       top[0]->mlu_tensor(),
-                                       transpose_op_param_ptr_));
+    MLU_CHECK(cnmlCreateNdTransposeProOp(&transpose_pro_op_ptr_,
+                                          bottom[0]->mlu_tensor(),
+                                          top[0]->mlu_tensor(),
+                                          transpose_op_param_ptr_));
   } else {
     // DeviceMemcpyOp
     //   if nothing is done, the data simply needs to
@@ -95,11 +91,11 @@ void MLUPermuteLayer<Dtype>::MLUCompileOp() {
   if (transpose_) {
     MLU_CHECK(cnmlCompileBaseOp(transpose_pro_op_ptr_,
                                 Caffe::rt_core(),
-                                Caffe::model_parallel()));
+                                Caffe::core_number()));
   } else {
     MLU_CHECK(cnmlCompileBaseOp(memcpy_op_ptr_,
                                 Caffe::rt_core(),
-                                Caffe::model_parallel()));
+                                Caffe::core_number()));
   }
 }
 
@@ -107,15 +103,17 @@ template <typename Dtype>
 void MLUPermuteLayer<Dtype>::Forward_mlu(const vector<Blob<Dtype>*>& bottom,
                                          const vector<Blob<Dtype>*>& top) {
   if (transpose_) {
-    MLU_CHECK(cnmlComputeTransposeProOpForward_V3(transpose_pro_op_ptr_,
-                                bottom[0]->mutable_mlu_data(),
-                                top[0]->mutable_mlu_data(),
-                                Caffe::forward_param(), Caffe::queue()));
+    MLU_CHECK(cnmlComputeNdTransposeProOpForward(transpose_pro_op_ptr_,
+                                                 bottom[0]->mutable_mlu_data(),
+                                                 top[0]->mutable_mlu_data(),
+                                                 Caffe::forward_param(),
+                                                 Caffe::queue()));
   } else {
     MLU_CHECK(cnmlComputeDeviceMemcpyOpForward_V3(memcpy_op_ptr_,
-                                bottom[0]->mutable_mlu_data(),
-                                top[0]->mutable_mlu_data(),
-                                Caffe::forward_param(), Caffe::queue()));
+                                                  bottom[0]->mutable_mlu_data(),
+                                                  top[0]->mutable_mlu_data(),
+                                                  Caffe::forward_param(),
+                                                  Caffe::queue()));
   }
 }
 
@@ -135,7 +133,7 @@ void MLUPermuteLayer<Dtype>::MLUDestroyOp() {
     transpose_pro_op_ptr_ = nullptr;
   }
   if (transpose_op_param_ptr_ != nullptr) {
-    MLU_CHECK(cnmlDestroyTransposeOpParam(&transpose_op_param_ptr_));
+    MLU_CHECK(cnmlDestroyNdTransposeOpParam(&transpose_op_param_ptr_));
     transpose_op_param_ptr_ = nullptr;
   }
   if (memcpy_op_ptr_ != nullptr) {

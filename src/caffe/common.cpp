@@ -2,7 +2,7 @@
 All modification made by Cambricon Corporation: © 2018--2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -35,6 +35,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <memory>
 #include "caffe/common.hpp"
 #include "caffe/util/rng.hpp"
+#include "caffe/net.hpp"
+
 
 namespace caffe {
 
@@ -91,10 +93,10 @@ Caffe::Caffe()
       random_generator_(), mode_(Caffe::CPU),
       solver_count_(1), solver_rank_(0), multiprocess_(false)
 #ifdef USE_MLU
-      , data_parallel_(1), model_parallel_(1), channel_id_(0),
-      in_datastrategy_(-1), out_datastrategy_(-1), affinity_(0x01),
-      queue_(nullptr), core_version_(CNML_C10), in_dataorder_(0),
-      out_dataorder_(0)
+      , core_number_(1), batchsize_(1), simpleFlag_(false),
+      top_dtype_(DT_INVALID), channel_id_(0), affinity_(0x01),
+      queue_(nullptr), core_version_(CNML_MLU270), detectop_mode_(false),
+      in_dataorder_(0), out_dataorder_(0), parallel_(1)
 #endif
 {
 #ifdef USE_CUDA
@@ -112,7 +114,7 @@ Caffe::Caffe()
     }
 #endif
 #ifdef USE_MLU
-    compute_forw_param_.data_parallelism = &data_parallel_;
+    compute_forw_param_.data_parallelism = &parallel_;
     compute_forw_param_.affinity = &affinity_;
     compute_forw_param_.end = CNRT_PARAM_END;
 #endif
@@ -276,6 +278,83 @@ void* Caffe::RNG::generator() {
   return static_cast<void*>(generator_->rng());
 }
 
+/*************************************************************/
+/* Generate offline model to memory                          */
+/* Input parameter:                                          */
+/* mcore:   core version. Should be MLU220, MLU270 */
+/* model:   protobuf text file path.                         */
+/* weight:  weight file path.                                */
+/* bangOp:  Use bangOp or not                                */
+/* Output parameter:                                         */
+/* buffer:  buffer holding the model.                        */
+/* modelsize_ptr: size of buffer.                            */
+/* Caller is supposed to free the buffer if the call         */
+/* succeeds. If the call fails, neight buffer nor            */
+/* modelsize_ptr is changed by the function.                 */
+/* return value: 0 for success.                              */
+/*************************************************************/
+int Caffe::genModeltoMemory(const std::string& v,
+                            const std::string& model,
+                            const std::string& weights,
+                            int usebangop,
+                            void** buffer,
+                            int* modelsize_ptr) {
+  cnmlCoreVersion_t v_;
+  if (v == "MLU270") v_ = CNML_MLU270;
+  if (v == "MLU220") v_ = CNML_MLU220;
+  if (v_ != CNML_MLU270 &&
+      v_ != CNML_MLU220 ) {
+    LOG(INFO) << "Incorrect core version";
+    return 1;
+  }
+  if (model.empty()) {
+    LOG(INFO) << "model path should point to a valid protobuf file";
+    return 1;
+  }
+  if (weights.empty()) {
+    LOG(INFO) << "weight path should point to a valid weights file";
+    return 1;
+  }
+  if (buffer == nullptr || modelsize_ptr == nullptr) {
+    LOG(INFO) << "buffer and size pointer should not be null";
+    return 1;
+  }
+
+
+  // Use fake device
+  Caffe::DeviceFlag = Caffe::FakeDevice;
+  Caffe::set_rt_core(v_);
+  Caffe::set_mode(Caffe::MFUS);
+  Caffe::setReshapeMode(Caffe::ReshapeMode::SETUPONLY);
+  Caffe::setDetectOpMode(usebangop);
+
+  Net<float> net(model, caffe::TEST);
+  net.CopyTrainedLayersFrom(weights);
+
+  // Fill in the value of im_info in prototxt.
+  // The value of im_info is only needed in prototxt having proposal layer.
+  if (net.has_blob("im_info")) {
+    CHECK_EQ(net.blob_by_name("im_info")->count(), 3)
+      << "The count of blob named im_info should be 3 in prototxt."
+      << " ( im_h, im_w, scale )";
+    float* im_info_data = net.blob_by_name("im_info")->mutable_cpu_data();
+    im_info_data[0] = net.input_blobs()[0]->height();
+    im_info_data[1] = net.input_blobs()[0]->width();
+    im_info_data[2] = 1;
+  }
+
+  uint64_t actual_size = 0;
+  void*  model_buf = nullptr;
+  bool issuccessful = net.genOfflineModelToMem(&model_buf, &actual_size);
+  if (issuccessful) {
+    *buffer = model_buf;
+    *modelsize_ptr = actual_size;
+    return 0;
+  }
+
+  return 1;
+}
+
 #ifdef USE_MLU
 const char* mluGetErrorString(cnmlStatus_t status) {
   switch (status) {
@@ -379,6 +458,80 @@ const char* cnrtGetErrorString(cnrtRet_t status) {
   return "Unknown CNRT status";
 }
 
+const cnmlDataType_t to_cnml_dtype(BaseDataType type) {
+  switch (type) {
+  case DT_FLOAT16:
+    return CNML_DATA_FLOAT16;
+  case DT_FLOAT32:
+    return CNML_DATA_FLOAT32;
+  case DT_DOUBLE:
+    return CNML_DATA_DOUBLE;
+  case DT_INT8:
+    return CNML_DATA_INT8;
+  case DT_UINT8:
+    return CNML_DATA_UINT8;
+  case DT_INT16:
+    return CNML_DATA_INT16;
+  case DT_INT32:
+    return CNML_DATA_INT32;
+  case DT_QUANT8:
+    return CNML_DATA_QUANT8;
+  case DT_BINARY:
+    return CNML_DATA_BINARY;
+  default:
+    return CNML_DATA_INVALID;
+  }
+}
+
+const cnrtDataType_t to_cnrt_dtype(BaseDataType type) {
+  switch (type) {
+  case DT_FLOAT16:
+    return CNRT_FLOAT16;
+  case DT_FLOAT32:
+    return CNRT_FLOAT32;
+  case DT_DOUBLE:
+    return CNRT_FLOAT64;
+  case DT_INT8:
+    return CNRT_INT8;
+  case DT_UINT8:
+    return CNRT_UINT8;
+  case DT_INT16:
+    return CNRT_INT16;
+  case DT_INT32:
+    return CNRT_INT32;
+  case DT_QUANT8:
+    return CNRT_QUANT8;
+  case DT_BINARY:
+    return CNRT_INVALID;
+  default:
+    return CNRT_INVALID;
+  }
+}
+
+const char* to_str_dtype(BaseDataType type) {
+  switch (type) {
+    case DT_FLOAT16:
+      return "FLOAT16";
+    case DT_FLOAT32:
+      return "FLOAT32";
+    case DT_DOUBLE:
+      return "DOUBLE";
+    case DT_INT8:
+      return "INT8";
+    case DT_UINT8:
+      return "UINT8";
+    case DT_INT16:
+      return "INT16";
+    case DT_INT32:
+      return "INT32";
+    case DT_QUANT8:
+      return "QUANT8";
+    case DT_BINARY:
+      return "BINARY";
+    default:
+      return "INVALID";
+  }
+}
 #endif
 
 #ifdef USE_CUDA

@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -38,6 +38,15 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 namespace caffe {
 
+/**
+ * @brief MLU acceleration of CycleSubLayer
+ *        CycleSubLayer computes bottom[0] - bottom[1] = top
+ * the shape of bottom[0] is n * c * h * w
+ * the shape of bottom[1] is 1 * c * 1 * 1
+ * the shape of top is n * c * h * w
+ * @param param provides LayerParameter. It has no parameters for now
+ *
+ */
 /**
  * @brief MLU acceleration of CyclesubLayer
  *

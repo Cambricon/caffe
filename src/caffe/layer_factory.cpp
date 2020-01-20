@@ -2,7 +2,7 @@
 All modification made by Cambricon Corporation: © 2018--2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -45,6 +45,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "caffe/layers/concat_layer.hpp"
 #include "caffe/layers/conv_depthwise_layer.hpp"
 #include "caffe/layers/conv_layer.hpp"
+#include "caffe/layers/convolution3d_layer.hpp"
 #include "caffe/layers/crelu_layer.hpp"
 #include "caffe/layers/crop_layer.hpp"
 #include "caffe/layers/cycleadd_layer.hpp"
@@ -59,6 +60,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "caffe/layers/elu_layer.hpp"
 #include "caffe/layers/exp_layer.hpp"
 #include "caffe/layers/flatten_layer.hpp"
+#include "caffe/layers/image_detect_layer.hpp"
 #include "caffe/layers/inner_product_layer.hpp"
 #include "caffe/layers/interp_layer.hpp"
 #include "caffe/layers/log_layer.hpp"
@@ -67,14 +69,21 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "caffe/layers/normalize_layer.hpp"
 #include "caffe/layers/permute_layer.hpp"
 #include "caffe/layers/pooling_layer.hpp"
+#include "caffe/layers/pool3d_layer.hpp"
 #include "caffe/layers/power_layer.hpp"
 #include "caffe/layers/prelu_layer.hpp"
 #include "caffe/layers/prior_box_layer.hpp"
+#include "caffe/layers/proposal_layer.hpp"
+#include "caffe/layers/psroi_pooling_layer.hpp"
 #include "caffe/layers/relu_layer.hpp"
 #include "caffe/layers/reorg_layer.hpp"
 #include "caffe/layers/reshape_layer.hpp"
 #include "caffe/layers/reverse_layer.hpp"
+#include "caffe/layers/rnn_layer.hpp"
+#include "caffe/layers/roi_align_layer.hpp"
+#include "caffe/layers/roi_pooling_layer.hpp"
 #include "caffe/layers/scale_layer.hpp"
+#include "caffe/layers/shufflechannel_layer.hpp"
 #include "caffe/layers/sigmoid_layer.hpp"
 #include "caffe/layers/silence_layer.hpp"
 #include "caffe/layers/slice_layer.hpp"
@@ -83,7 +92,9 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "caffe/layers/sub_layer.hpp"
 #include "caffe/layers/tanh_layer.hpp"
 #include "caffe/layers/unpooling_layer.hpp"
+#include "caffe/layers/upsample_layer.hpp"
 #include "caffe/layers/threshold_layer.hpp"
+#include "caffe/layers/yolov3_detection_layer.hpp"
 #include "caffe/proto/caffe.pb.h"
 #ifdef USE_CUDNN
 #include "caffe/layers/cudnn_conv_layer.hpp"
@@ -106,17 +117,21 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "caffe/layers/mlu_concat_layer.hpp"
 #include "caffe/layers/mlu_conv_depthwise_layer.hpp"
 #include "caffe/layers/mlu_conv_layer.hpp"
+#include "caffe/layers/mlu_conv3d_layer.hpp"
 #include "caffe/layers/mlu_crelu_layer.hpp"
 #include "caffe/layers/mlu_crop_layer.hpp"
 #include "caffe/layers/mlu_cycleadd_layer.hpp"
 #include "caffe/layers/mlu_cyclemult_layer.hpp"
 #include "caffe/layers/mlu_cyclesub_layer.hpp"
-#include "caffe/layers/mlu_detection_pose_output_layer.hpp"
+#include "caffe/layers/mlu_deconv_layer.hpp"
+#include "caffe/layers/mlu_detection_out_layer.hpp"
+#include "caffe/layers/mlu_detection_output_layer.hpp"
 #include "caffe/layers/mlu_dropout_layer.hpp"
 #include "caffe/layers/mlu_eltwise_layer.hpp"
 #include "caffe/layers/mlu_elu_layer.hpp"
 #include "caffe/layers/mlu_exp_layer.hpp"
 #include "caffe/layers/mlu_flatten_layer.hpp"
+#include "caffe/layers/mlu_image_detect_layer.hpp"
 #include "caffe/layers/mlu_inner_product_layer.hpp"
 #include "caffe/layers/mlu_interp_layer.hpp"
 #include "caffe/layers/mlu_log_layer.hpp"
@@ -125,25 +140,34 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "caffe/layers/mlu_normalize_layer.hpp"
 #include "caffe/layers/mlu_permute_layer.hpp"
 #include "caffe/layers/mlu_pooling_layer.hpp"
+#include "caffe/layers/mlu_pool3d_layer.hpp"
 #include "caffe/layers/mlu_power_layer.hpp"
 #include "caffe/layers/mlu_prelu_layer.hpp"
 #include "caffe/layers/mlu_prior_box_layer.hpp"
+#include "caffe/layers/mlu_proposal_layer.hpp"
+#include "caffe/layers/mlu_psroi_pooling_layer.hpp"
 #include "caffe/layers/mlu_relu_layer.hpp"
 #include "caffe/layers/mlu_reorg_layer.hpp"
 #include "caffe/layers/mlu_reshape_layer.hpp"
+#include "caffe/layers/mlu_resizecrop_layer.hpp"
 #include "caffe/layers/mlu_reverse_layer.hpp"
+#include "caffe/layers/mlu_rnn_layer.hpp"
+#include "caffe/layers/mlu_roi_pooling_layer.hpp"
 #include "caffe/layers/mlu_scale_layer.hpp"
+#include "caffe/layers/mlu_shufflechannel_layer.hpp"
 #include "caffe/layers/mlu_sigmoid_layer.hpp"
 #include "caffe/layers/mlu_silence_layer.hpp"
 #include "caffe/layers/mlu_slice_layer.hpp"
 #include "caffe/layers/mlu_softmax_layer.hpp"
 #include "caffe/layers/mlu_sqrt_layer.hpp"
 #include "caffe/layers/mlu_ssd_detection_layer.hpp"
-#include "caffe/layers/mlu_ssd_detection_pose_layer.hpp"
 #include "caffe/layers/mlu_sub_layer.hpp"
 #include "caffe/layers/mlu_tanh_layer.hpp"
 #include "caffe/layers/mlu_unpooling_layer.hpp"
+#include "caffe/layers/mlu_upsample_layer.hpp"
 #include "caffe/layers/mlu_threshold_layer.hpp"
+#include "caffe/layers/mlu_yolov3_detection_layer.hpp"
+#include "caffe/layers/mlu_addpad_layer.hpp"
 #endif
 #ifdef WITH_PYTHON_LAYER
 #include "caffe/layers/python_layer.hpp"
@@ -203,6 +227,31 @@ shared_ptr<Layer<Dtype>> GetCReLULayer(const LayerParameter& param) {
 }
 REGISTER_LAYER_CREATOR(CReLU, GetCReLULayer);
 
+/*Get UpsampleLayer*/
+template <typename Dtype>
+shared_ptr<Layer<Dtype>> GetUpsampleLayer(const LayerParameter& param) {
+  Engine engine = param.engine();
+  if (engine == Engine::DEFAULT) {
+    engine = Engine::CAFFE;
+#ifdef USE_MLU
+    engine = Engine::MLU;
+#endif
+  }
+  if (engine == Engine::CAFFE) {
+    return shared_ptr<Layer<Dtype>>(new UpsampleLayer<Dtype>(param));
+#ifdef USE_MLU
+  } else if (engine == Engine::MLU) {
+    if (Caffe::mode() == Caffe::MLU || Caffe::mode() == Caffe::MFUS) {
+      return shared_ptr<Layer<Dtype>>(new MLUUpsampleLayer<Dtype>(param));
+    } else {
+      return shared_ptr<Layer<Dtype>>(new UpsampleLayer<Dtype>(param));
+    }
+#endif
+  } else {
+    LOG(FATAL) << "Layer " << param.name() << " has unknown engine.";
+  }
+}
+REGISTER_LAYER_CREATOR(Upsample, GetUpsampleLayer);
 
 /*Get SilenceLayer*/
 template <typename Dtype>
@@ -255,6 +304,32 @@ shared_ptr<Layer<Dtype>> GetSqrtLayer(const LayerParameter& param) {
   }
 }
 REGISTER_LAYER_CREATOR(Sqrt, GetSqrtLayer);
+
+/*Get ShuffleChannelLayer*/
+template <typename Dtype>
+shared_ptr<Layer<Dtype>> GetShuffleChannelLayer(const LayerParameter& param) {
+  Engine engine = param.engine();
+  if (engine == Engine::DEFAULT) {
+    engine = Engine::CAFFE;
+#ifdef USE_MLU
+    engine = Engine::MLU;
+#endif
+  }
+  if (engine == Engine::CAFFE) {
+    return shared_ptr<Layer<Dtype>>(new ShuffleChannelLayer<Dtype>(param));
+#ifdef USE_MLU
+  } else if (engine == Engine::MLU) {
+    if (Caffe::mode() == Caffe::MLU || Caffe::mode() == Caffe::MFUS) {
+      return shared_ptr<Layer<Dtype>>(new MLUShuffleChannelLayer<Dtype>(param));
+    } else {
+      return shared_ptr<Layer<Dtype>>(new ShuffleChannelLayer<Dtype>(param));
+    }
+#endif
+  } else {
+    LOG(FATAL) << "Layer " << param.name() << " has unknown engine.";
+  }
+}
+REGISTER_LAYER_CREATOR(ShuffleChannel, GetShuffleChannelLayer);
 
 /* crop layer */
 template <typename Dtype>
@@ -634,6 +709,62 @@ shared_ptr<Layer<Dtype>> GetReverseLayer(const LayerParameter& param) {
   }
 }
 REGISTER_LAYER_CREATOR(Reverse, GetReverseLayer);
+// Get Proposal layer according to engine
+template <typename Dtype>
+shared_ptr<Layer<Dtype>> GetProposalLayer(const LayerParameter& param) {
+  Engine engine = param.engine();
+  if (engine == Engine::DEFAULT) {
+    engine = Engine::CAFFE;
+#ifdef USE_MLU
+    engine = Engine::MLU;
+#endif
+  }
+  if (engine == Engine::CAFFE) {
+    return shared_ptr<Layer<Dtype>>(new ProposalLayer<Dtype>(param));
+#ifdef USE_MLU
+  } else if (engine == Engine::MLU) {
+    if (Caffe::mode() == Caffe::MLU || Caffe::mode() == Caffe::MFUS)
+      return shared_ptr<Layer<Dtype>>(new MLUProposalLayer<Dtype>(param));
+    else
+      return shared_ptr<Layer<Dtype>>(new ProposalLayer<Dtype>(param));
+#endif
+  } else {
+    LOG(FATAL) << "Layer " << param.name() << "has unknown engine.";
+    throw;  // Avoids missing return warning
+  }
+}
+REGISTER_LAYER_CREATOR(Proposal, GetProposalLayer);
+// Get ROIPooling layer according to engine
+template <typename Dtype>
+shared_ptr<Layer<Dtype>> GetROIPoolingLayer(const LayerParameter& param) {
+  Engine engine = param.engine();
+  if (engine == Engine::DEFAULT) {
+    engine = Engine::CAFFE;
+#ifdef USE_MLU
+    engine = Engine::MLU;
+#endif
+  }
+  if (engine == Engine::CAFFE) {
+    return shared_ptr<Layer<Dtype>>(new ROIPoolingLayer<Dtype>(param));
+#ifdef USE_MLU
+  } else if (engine == Engine::MLU) {
+    if (Caffe::mode() == Caffe::MLU || Caffe::mode() == Caffe::MFUS)
+      return shared_ptr<Layer<Dtype>>(new MLUROIPoolingLayer<Dtype>(param));
+    else
+      return shared_ptr<Layer<Dtype>>(new ROIPoolingLayer<Dtype>(param));
+#endif
+  } else {
+    LOG(FATAL) << "Layer " << param.name() << "has unknown engine.";
+    throw;  // Avoids missing return warning
+  }
+}
+REGISTER_LAYER_CREATOR(ROIPooling, GetROIPoolingLayer);
+// Get ROIAlign layer according to engine
+template <typename Dtype>
+shared_ptr<Layer<Dtype>> GetROIAlignLayer(const LayerParameter& param) {
+  return shared_ptr<Layer<Dtype>>(new ROIAlignLayer<Dtype>(param));
+}
+REGISTER_LAYER_CREATOR(ROIAlign, GetROIAlignLayer);
 // Get Interp layer according to engine
 template <typename Dtype>
 shared_ptr<Layer<Dtype>> GetInterpLayer(const LayerParameter& param) {
@@ -707,6 +838,32 @@ shared_ptr<Layer<Dtype>> GetConvolutionLayer(const LayerParameter& param) {
 }
 REGISTER_LAYER_CREATOR(Convolution, GetConvolutionLayer);
 
+// Conv3D
+template <typename Dtype>
+shared_ptr<Layer<Dtype>> GetConvolution3DLayer(const LayerParameter& param) {
+  Engine engine = param.engine();
+  if (engine == Engine::DEFAULT) {
+    engine = Engine::CAFFE;
+#ifdef USE_MLU
+    engine = Engine::MLU;
+#endif
+  }
+  if (engine == Engine::CAFFE) {
+    return shared_ptr<Layer<Dtype>>(new Convolution3DLayer<Dtype>(param));
+#ifdef USE_MLU
+  } else if (engine == Engine::MLU) {
+    if (Caffe::mode() == Caffe::MLU || Caffe::mode() == Caffe::MFUS)
+      return shared_ptr<Layer<Dtype>>(new MLUConvolution3DLayer<Dtype>(param));
+    else
+      return shared_ptr<Layer<Dtype>>(new Convolution3DLayer<Dtype>(param));
+#endif
+  } else {
+    LOG(FATAL) << "Layer " << param.name() << " has unknown engine.";
+    throw;  // Avoids missing return warning
+  }
+}
+REGISTER_LAYER_CREATOR(Convolution3D, GetConvolution3DLayer);
+
 // Get convolution_depthwise layer according to engine.
 template <typename Dtype>
 shared_ptr<Layer<Dtype>> GetConvolutionDepthwiseLayer(
@@ -758,6 +915,9 @@ shared_ptr<Layer<Dtype>> GetDeconvolutionLayer(const LayerParameter& param) {
       engine = Engine::CUDNN;
     }
 #endif
+#ifdef USE_MLU
+    engine = Engine::MLU;
+#endif
   }
   if (engine == Engine::CAFFE) {
     return shared_ptr<Layer<Dtype>>(new DeconvolutionLayer<Dtype>(param));
@@ -768,6 +928,13 @@ shared_ptr<Layer<Dtype>> GetDeconvolutionLayer(const LayerParameter& param) {
                  << param.name();
     }
     return shared_ptr<Layer<Dtype>>(new CuDNNDeconvolutionLayer<Dtype>(param));
+#endif
+#ifdef USE_MLU
+  } else if (engine == Engine::MLU) {
+    if (Caffe::mode() == Caffe::MLU || Caffe::mode() == Caffe::MFUS)
+      return shared_ptr<Layer<Dtype>>(new MLUDeconvolutionLayer<Dtype>(param));
+    else
+      return shared_ptr<Layer<Dtype>>(new DeconvolutionLayer<Dtype>(param));
 #endif
   } else {
     LOG(FATAL) << "Layer " << param.name() << " has unknown engine.";
@@ -822,6 +989,33 @@ shared_ptr<Layer<Dtype>> GetPoolingLayer(const LayerParameter& param) {
   }
 }
 REGISTER_LAYER_CREATOR(Pooling, GetPoolingLayer);
+
+// Get pooling3D layer according to engine.
+template <typename Dtype>
+shared_ptr<Layer<Dtype>> GetPooling3DLayer(const LayerParameter& param) {
+  Engine engine = param.engine();
+  if (engine == Engine::DEFAULT) {
+    engine = Engine::CAFFE;
+#ifdef USE_MLU
+    engine = Engine::MLU;
+#endif
+  }
+  if (engine == Engine::CAFFE) {
+    return shared_ptr<Layer<Dtype>>(new Pooling3DLayer<Dtype>(param));
+#ifdef USE_MLU
+  } else if (engine == Engine::MLU) {
+    if (Caffe::mode() == Caffe::MLU || Caffe::mode() == Caffe::MFUS)
+      return shared_ptr<Layer<Dtype>>(new MLUPooling3DLayer<Dtype>(param));
+    else
+      return shared_ptr<Layer<Dtype>>(new Pooling3DLayer<Dtype>(param));
+#endif
+  } else {
+    LOG(FATAL) << "Layer " << param.name() << " has unknown engine.";
+    throw;  // Avoids missing return warning
+  }
+}
+REGISTER_LAYER_CREATOR(Pooling3D, GetPooling3DLayer);
+
 // Get AbsVal
 template <typename Dtype>
 shared_ptr<Layer<Dtype>> GetAbsValLayer(const LayerParameter& param) {
@@ -1058,6 +1252,14 @@ shared_ptr<Layer<Dtype>> GetELULayer(const LayerParameter& param) {
   }
 }
 REGISTER_LAYER_CREATOR(ELU, GetELULayer);
+
+/* cropresize layer */
+template <typename Dtype>
+shared_ptr<Layer<Dtype>> GetResizecropLayer(const LayerParameter& param) {
+  ResizecropParameter resize_param = param.resize_crop_param();
+  return shared_ptr<Layer<Dtype>>(new MLUResizecropLayer<Dtype>(param));
+}
+REGISTER_LAYER_CREATOR(MLUResizecrop, GetResizecropLayer);
 
 // Argmax Register
 template <typename Dtype>
@@ -1302,7 +1504,6 @@ shared_ptr<Layer<Dtype>> GetReshapeLayer(const LayerParameter& param) {
 
 REGISTER_LAYER_CREATOR(Reshape, GetReshapeLayer);
 
-
 template <typename Dtype>
 shared_ptr<Layer<Dtype>> GetFlattenLayer(const LayerParameter& param) {
   Engine engine = param.engine();
@@ -1355,16 +1556,50 @@ shared_ptr<Layer<Dtype>> GetPermuteLayer(const LayerParameter& param) {
 
 REGISTER_LAYER_CREATOR(Permute, GetPermuteLayer);
 
-
+template <typename Dtype>
+shared_ptr<Layer<Dtype>> GetRNNLayer(const LayerParameter& param) {
+  Engine engine = param.engine();
+  if (engine == Engine::DEFAULT) {
+    engine = Engine::CAFFE;
+#ifdef USE_MLU
+    engine = Engine::MLU;
+#endif
+  }
+  if (engine == Engine::CAFFE) {
+    return shared_ptr<Layer<Dtype>>(new RNNLayer<Dtype>(param));
+#ifdef USE_MLU
+  } else if (engine == Engine::MLU) {
+    if (Caffe::mode() == Caffe::MLU || Caffe::mode() == Caffe::MFUS)
+      return shared_ptr<Layer<Dtype>>(new MLURNNLayer<Dtype>(param));
+    else
+      return shared_ptr<Layer<Dtype>>(new RNNLayer<Dtype>(param));
+#endif
+  } else {
+    LOG(FATAL) << "Layer " << param.name() << " has unknown engine.";
+    throw;  // Avoids missing return warning
+  }
+}
+REGISTER_LAYER_CREATOR(RNN, GetRNNLayer);
 
 template <typename Dtype>
 shared_ptr<Layer<Dtype>> GetDetectionOutputLayer(const LayerParameter& param) {
   Engine engine = param.engine();
   if (engine == Engine::DEFAULT) {
     engine = Engine::CAFFE;
+#ifdef USE_MLU
+    engine = Engine::MLU;
+#endif
   }
   if (engine == Engine::CAFFE) {
     return shared_ptr<Layer<Dtype>>(new DetectionOutputLayer<Dtype>(param));
+#ifdef USE_MLU
+  } else if (engine == Engine::MLU) {
+    if (Caffe::mode() == Caffe::MLU || Caffe::mode() == Caffe::MFUS)
+      return shared_ptr<Layer<Dtype>>(
+          new MLUDetectionOutputLayer<Dtype>(param));
+    else
+      return shared_ptr<Layer<Dtype>>(new DetectionOutputLayer<Dtype>(param));
+#endif
   } else {
     LOG(FATAL) << "Layer " << param.name() << " has unknown engine.";
     throw;  // Avoids missing return warning
@@ -1376,28 +1611,7 @@ REGISTER_LAYER_CREATOR(DetectionOutput, GetDetectionOutputLayer);
 template <typename Dtype>
 shared_ptr<Layer<Dtype>> GetDetectionPoseOutputLayer(
     const LayerParameter& param) {
-  Engine engine = param.engine();
-  if (engine == Engine::DEFAULT) {
-    engine = Engine::CAFFE;
-#ifdef USE_MLU
-    engine = Engine::MLU;
-#endif
-  }
-  if (engine == Engine::CAFFE) {
-    return shared_ptr<Layer<Dtype>>(new DetectionPoseOutputLayer<Dtype>(param));
-#ifdef USE_MLU
-  } else if (engine == Engine::MLU) {
-    if (Caffe::mode() == Caffe::MLU || Caffe::mode() == Caffe::MFUS)
-      return shared_ptr<Layer<Dtype>>(
-          new MLUDetectionPoseOutputLayer<Dtype>(param));
-    else
-      return shared_ptr<Layer<Dtype>>(
-          new DetectionPoseOutputLayer<Dtype>(param));
-#endif
-  } else {
-    LOG(FATAL) << "Layer " << param.name() << " has unknown engine.";
-    throw;  // Avoids missing return warning
-  }
+  return shared_ptr<Layer<Dtype>>(new DetectionPoseOutputLayer<Dtype>(param));
 }
 
 REGISTER_LAYER_CREATOR(DetectionPoseOutput, GetDetectionPoseOutputLayer);
@@ -1428,6 +1642,31 @@ shared_ptr<Layer<Dtype>> GetPriorBoxLayer(const LayerParameter& param) {
 
 REGISTER_LAYER_CREATOR(PriorBox, GetPriorBoxLayer);
 
+template <typename Dtype>
+shared_ptr<Layer<Dtype>> GetPSROIPoolingLayer(const LayerParameter& param) {
+  Engine engine = param.engine();
+  if (engine == Engine::DEFAULT) {
+    engine = Engine::CAFFE;
+#ifdef USE_MLU
+    engine = Engine::MLU;
+#endif
+  }
+  if (engine == Engine::CAFFE) {
+    return shared_ptr<Layer<Dtype>>(new PSROIPoolingLayer<Dtype>(param));
+#ifdef USE_MLU
+  } else if (engine == Engine::MLU) {
+    if (Caffe::mode() == Caffe::MLU || Caffe::mode() == Caffe::MFUS)
+      return shared_ptr<Layer<Dtype>>(new MLUPSROIPoolingLayer<Dtype>(param));
+    else
+      return shared_ptr<Layer<Dtype>>(new PSROIPoolingLayer<Dtype>(param));
+#endif
+  } else {
+    LOG(FATAL) << "Layer " << param.name() << " has unknown engine.";
+    throw;  // Avoids missing return warning
+  }
+}
+
+REGISTER_LAYER_CREATOR(PSROIPooling, GetPSROIPoolingLayer);
 
 #ifdef USE_MLU
 template <typename Dtype>
@@ -1451,30 +1690,33 @@ shared_ptr<Layer<Dtype>> GetSsdDetectionLayer(const LayerParameter& param) {
 
 REGISTER_LAYER_CREATOR(SsdDetection, GetSsdDetectionLayer);
 
+#endif
+
 template <typename Dtype>
-shared_ptr<Layer<Dtype>> GetSsdDetectionPoseLayer(const LayerParameter& param) {
+shared_ptr<Layer<Dtype>> GetImageDetectLayer(const LayerParameter& param) {
   Engine engine = param.engine();
   if (engine == Engine::DEFAULT) {
+    engine = Engine::CAFFE;
+#ifdef USE_MLU
     engine = Engine::MLU;
+#endif
   }
   if (engine == Engine::CAFFE) {
-    return shared_ptr<Layer<Dtype>>(new MLUSsdDetectionPoseLayer<Dtype>(param));
+    return shared_ptr<Layer<Dtype>>(new ImageDetectLayer<Dtype>(param));
+#ifdef USE_MLU
   } else if (engine == Engine::MLU) {
     if (Caffe::mode() == Caffe::MLU || Caffe::mode() == Caffe::MFUS)
-      return shared_ptr<Layer<Dtype>>(
-          new MLUSsdDetectionPoseLayer<Dtype>(param));
+      return shared_ptr<Layer<Dtype>>(new MLUImageDetectLayer<Dtype>(param));
     else
-      return shared_ptr<Layer<Dtype>>(
-          new MLUSsdDetectionPoseLayer<Dtype>(param));
+      return shared_ptr<Layer<Dtype>>(new MLUImageDetectLayer<Dtype>(param));
+#endif
   } else {
     LOG(FATAL) << "Layer " << param.name() << " has unknown engine.";
     throw;  // Avoids missing return warning
   }
 }
 
-REGISTER_LAYER_CREATOR(SsdDetectionPose, GetSsdDetectionPoseLayer);
-#endif
-
+REGISTER_LAYER_CREATOR(ImageDetect, GetImageDetectLayer);
 
 // Get Detection_out Layer according to engine
 template <typename Dtype>
@@ -1490,8 +1732,8 @@ shared_ptr<Layer<Dtype>> GetDetectionOutLayer(const LayerParameter& param) {
     return shared_ptr<Layer<Dtype>>(new DetectionOutLayer<Dtype>(param));
 #ifdef USE_MLU
   } else if (engine == Engine::MLU) {
-    if (Caffe::mode() == Caffe::MLU || Caffe::mode() == Caffe::MFUS)
-      return shared_ptr<Layer<Dtype>>(new DetectionOutLayer<Dtype>(param));
+    if (Caffe::getDetectOpMode() == true)
+      return shared_ptr<Layer<Dtype>>(new MLUDetectionOutLayer<Dtype>(param));
     else
       return shared_ptr<Layer<Dtype>>(new DetectionOutLayer<Dtype>(param));
 #endif
@@ -1527,6 +1769,55 @@ shared_ptr<Layer<Dtype>> GetThresholdLayer(const LayerParameter& param) {
   }
 }
 REGISTER_LAYER_CREATOR(Threshold, GetThresholdLayer);
+
+#ifdef USE_MLU
+// Get AddPad Layer according to engine
+template <typename Dtype>
+shared_ptr<Layer<Dtype>> GetAddPadLayer(const LayerParameter& param) {
+  Engine engine = param.engine();
+  if (engine == Engine::DEFAULT) {
+    engine = Engine::MLU;
+  }
+  if (engine == Engine::CAFFE) {
+    return shared_ptr<Layer<Dtype>>(new MLUAddPadLayer<Dtype>(param));
+  } else if (engine == Engine::MLU) {
+    if (Caffe::mode() == Caffe::MLU || Caffe::mode() == Caffe::MFUS)
+      return shared_ptr<Layer<Dtype>>(new MLUAddPadLayer<Dtype>(param));
+    else
+      return shared_ptr<Layer<Dtype>>(new MLUAddPadLayer<Dtype>(param));
+  } else {
+    LOG(FATAL) << "Layer " << param.name() << "has unknown engine.";
+    throw;
+  }
+}
+REGISTER_LAYER_CREATOR(AddPad, GetAddPadLayer);
+#endif
+
+// Get yolov3 Layer according to engine
+template <typename Dtype>
+shared_ptr<Layer<Dtype>> GetYolov3DetectionLayer(const LayerParameter& param) {
+  Engine engine = param.engine();
+  if (engine == Engine::DEFAULT) {
+    engine = Engine::CAFFE;
+#ifdef USE_MLU
+    engine = Engine::MLU;
+#endif
+  }
+  if (engine == Engine::CAFFE) {
+    return shared_ptr<Layer<Dtype>>(new Yolov3DetectionLayer<Dtype>(param));
+#ifdef USE_MLU
+  } else if (engine == Engine::MLU) {
+    if (Caffe::mode() == Caffe::MLU || Caffe::mode() == Caffe::MFUS)
+      return shared_ptr<Layer<Dtype>>(new MLUYolov3DetectionLayer<Dtype>(param));
+    else
+      return shared_ptr<Layer<Dtype>>(new MLUYolov3DetectionLayer<Dtype>(param));
+#endif
+  } else {
+    LOG(FATAL) << "Layer " << param.name() << "has unknown engine.";
+    throw;
+  }
+}
+REGISTER_LAYER_CREATOR(Yolov3Detection, GetYolov3DetectionLayer);
 
 #ifdef WITH_PYTHON_LAYER
 template <typename Dtype>

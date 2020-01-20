@@ -2,7 +2,7 @@
 All modification made by Cambricon Corporation: © 2018--2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -28,23 +28,23 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
 #if defined(USE_MLU) && defined(USE_OPENCV)
-#include <opencv2/core/core.hpp>
-#include <opencv2/highgui/highgui.hpp>
-#include <opencv2/imgproc/imgproc.hpp>
 #include <algorithm>
 #include <iomanip>
 #include <iosfwd>
 #include <map>
 #include <memory>
+#include <opencv2/core/core.hpp>
+#include <opencv2/highgui/highgui.hpp>
+#include <opencv2/imgproc/imgproc.hpp>
 #include <queue>
 #include <string>
 #include <utility>
 #include <vector>
 
-#include "cnrt.h" // NOLINT
 #include "blocking_queue.hpp"
+#include "cnrt.h"  // NOLINT
 #include "common_functions.hpp"
-
+#define MAX_NBOXES 1024
 using std::queue;
 using std::string;
 using std::stringstream;
@@ -64,43 +64,40 @@ DEFINE_string(outputdir, ".", "The directoy used to save output images");
 DEFINE_string(labels, "", "infomation about mapping from label to name");
 DEFINE_int32(mludevice, 0, "set using mlu device number, default: 0");
 DEFINE_int32(fix8, 0, "FP16 or FIX8, fix8 mode, default: 0");
-DEFINE_int32(int8, -1, "invalid(-1), fp16(0) or int8(1) mode. Default is invalid(-1)."
-    "If specified, use int8 value, else, use fix8 value");
+DEFINE_int32(int8, -1,
+             "invalid(-1), fp16(0) or int8(1) mode. Default is invalid(-1)."
+             "If specified, use int8 value, else, use fix8 value");
 DEFINE_string(logdir, "",
               "path to dump log file, to terminal "
               "stderr by default");
 DEFINE_int32(dump, 0, "0 or 1, dump output images or not.");
-DEFINE_double(confidence, 0.25, "Only keep detections with scores  equal "
-                                         "to or higher than the confidence.");
-DEFINE_double(nmsthresh, 0.45, "Identify the optimal cell among all candidates "
-                               " when the object lies in multiple cells of a grid");
-DEFINE_string(bboxanchordir, "./bbox_anchor/", "The directoy used to read"
-                             " anchor_tensors and x_y_offset");
-
+DEFINE_double(confidence, 0.25,
+              "Only keep detections with scores  equal "
+              "to or higher than the confidence.");
+DEFINE_double(nmsthresh, 0.45,
+              "Identify the optimal cell among all candidates "
+              " when the object lies in multiple cells of a grid");
 
 class Detector {
-  public:
+ public:
   Detector(const string& modelFile, const string& meanFile,
            const string& meanValues);
   ~Detector();
 
-  vector<vector<vector<float>>> detect(
-    const vector<cv::Mat>& images,
-    const vector<vector<vector<float>>>& x_y_offsets,
-    const vector<vector<vector<float>>>& anchor_tensors);
+  vector<vector<vector<float>>> detect(const vector<cv::Mat>& images);
   int getBatchSize() { return batchSize; }
-  int inputDim() { return inputShape[2]; }
-  float mluTime()  { return mlu_time; }
+  int inputDim() { return inDimValues_[0][1]; }
+  float mluTime() { return mlu_time; }
   void readImages(queue<string>* imagesQueue, int inputNumber,
                   vector<cv::Mat>* images, vector<string>* imageNames);
 
-  private:
+ private:
   void setMean(const string& meanFile, const string& meanValues);
   void wrapInputLayer(vector<vector<cv::Mat>>* inputImages);
   void preProcess(const vector<cv::Mat>& images,
                   vector<vector<cv::Mat>>* inputImages);
 
-  private:
+ private:
   cnrtModel_t model;
   cv::Size inputGeometry;
   int batchSize;
@@ -110,21 +107,21 @@ class Detector {
   void** outputCpuPtrS;
   void** inputMluPtrS;
   void** outputMluPtrS;
+  void** inputSyncPtrS;
+  void** outputSyncPtrS;
   void** param;
-  vector<float*> yolov3_input_cpu;
-  vector<float*> yolov3_output_cpu;
-  cnrtDataDescArray_t inputDescS, outputDescS;
   cnrtQueue_t cnrt_queue;
   int inputNum, outputNum;
   cnrtFunction_t function;
-
-  vector<int> inputShape;
-  vector<vector<int>> outputShape;
-  int inputCount;
-  int outputCount;
+  int64_t* inputSizeArray;
+  int64_t* outputSizeArray;
+  cnrtDataType_t* inputDataTypeArray;
+  cnrtDataType_t* outputDataTypeArray;
+  vector<int> inCounts_, outCounts_;
+  vector<int> inDimNums_, outDimNums_;
+  vector<int*> inDimValues_, outDimValues_;
   float mlu_time;
-  vector<int> outputCounts;
-  vector<vector<vector<float>>> tensors;
+  cnrtRuntimeContext_t rt_ctx;
 };
 
 Detector::Detector(const string& modelFile, const string& meanFile,
@@ -148,87 +145,83 @@ Detector::Detector(const string& modelFile, const string& meanFile,
   string name = "subnet0";
   cnrtCreateFunction(&function);
   cnrtExtractFunction(&function, model, name.c_str());
-  // initializa function memory
-  cnrtInitFuncParam_t initFuncParam;
-  bool muta = false;
-  int data_parallel = 1;
-  unsigned int affinity = 0x01;
-  initFuncParam.muta = &muta;
-  initFuncParam.affinity = &affinity;
-  initFuncParam.data_parallelism = &data_parallel;
-  initFuncParam.end = CNRT_PARAM_END;
-  cnrtInitFunctionMemory_V2(function, &initFuncParam);
   // 3. get function's I/O DataDesc
-  cnrtGetInputDataDesc(&inputDescS, &inputNum, function);
-  cnrtGetOutputDataDesc(&outputDescS, &outputNum, function);
-#if !defined(CROSS_COMPILE) && !defined(CROSS_COMPILE_ARM64)
-  uint64_t stack_size;
-  cnrtQueryModelStackSize(model, &stack_size);
-  unsigned int current_device_size;
-  cnrtGetStackMem(&current_device_size);
-  if (stack_size > current_device_size) {
-    cnrtSetStackMem(stack_size + 50);
-  }
-#endif  // CROSS_COMPILE && CROSS_COMPILE_ARM64
+  CNRT_CHECK(cnrtGetInputDataSize(&inputSizeArray,
+        &inputNum, function));
+  CNRT_CHECK(cnrtGetOutputDataSize(&outputSizeArray,
+        &outputNum, function));
+  CNRT_CHECK(cnrtGetInputDataType(&inputDataTypeArray,
+        &inputNum, function));
+  CNRT_CHECK(cnrtGetOutputDataType(&outputDataTypeArray,
+        &outputNum, function));
   // 4. allocate I/O data space on CPU memory and prepare Input data
   inputCpuPtrS = reinterpret_cast<void**>(malloc(sizeof(void*) * inputNum));
   outputCpuPtrS = reinterpret_cast<void**>(malloc(sizeof(void*) * outputNum));
+  inputSyncPtrS = reinterpret_cast<void**>(malloc(sizeof(void*) * inputNum));
+  outputSyncPtrS = reinterpret_cast<void**>(malloc(sizeof(void*) * outputNum));
 
+  inCounts_.resize(inputNum, 1);
+  outCounts_.resize(outputNum, 1);
+  inDimNums_.resize(inputNum, 0);
+  outDimNums_.resize(outputNum, 0);
+  inDimValues_.resize(inputNum, nullptr);
+  outDimValues_.resize(outputNum, nullptr);
   /* input shape : 1, 3, 416, 416 */
   for (int i = 0; i < inputNum; i++) {
-    unsigned int inNum, inChannel, inHeight, inWidth;
-    cnrtDataDesc_t inputDesc = inputDescS[i];
-    cnrtGetHostDataCount(inputDesc, &inputCount);
+    CNRT_CHECK(cnrtGetInputDataShape(&(inDimValues_[i]),
+        &(inDimNums_[i]), i, function));
+    for (int j = 0; j < inDimNums_[i]; ++j) {
+      this->inCounts_[i] *= inDimValues_[i][j];
+      LOG(INFO) << "shape " << inDimValues_[i][j];
+    }
+    if (i == 0) {
+      batchSize = inDimValues_[i][0];
+      numberChannels = inDimValues_[i][3];
+      inputGeometry = cv::Size(inDimValues_[i][2], inDimValues_[i][1]);
+    }
     inputCpuPtrS[i] =
-        reinterpret_cast<void*>(malloc(sizeof(float) * inputCount));
-    cnrtSetHostDataLayout(inputDesc, CNRT_FLOAT32, CNRT_NCHW);
-    cnrtGetDataShape(inputDesc, &inNum, &inChannel, &inHeight, &inWidth);
-    float* inputData = reinterpret_cast<float*>(inputCpuPtrS[i]);
-    yolov3_input_cpu.push_back(inputData);
-    batchSize = inNum;
-    numberChannels = inChannel;
-    inputGeometry = cv::Size(inWidth, inHeight);
-    inputShape.push_back(inNum);
-    inputShape.push_back(inChannel);
-    inputShape.push_back(inHeight);
-    inputShape.push_back(inWidth);
-    LOG(INFO) << "shape " << inNum;
-    LOG(INFO) << "shape " << inChannel;
-    LOG(INFO) << "shape " << inHeight;
-    LOG(INFO) << "shape " << inWidth;
+        reinterpret_cast<void*>(malloc(sizeof(float) * inCounts_[i]));
+    inputSyncPtrS[i] =
+        reinterpret_cast<void*>(malloc(inputSizeArray[i]));
   }
 
-  /* output shape1 : 1, 255, 13, 13  */
-  /* output shape2 : 1, 255, 26, 26  */
-  /* output shape3 : 1, 255, 52, 52  */
   for (int i = 0; i < outputNum; i++) {
-    vector<int> shape;
-    unsigned int outNum, outChannel, outHeight, outWidth;
-    cnrtDataDesc_t outputDesc = outputDescS[i];
-    cnrtSetHostDataLayout(outputDesc, CNRT_FLOAT32, CNRT_NCHW);
-    cnrtGetHostDataCount(outputDesc, &outputCount);
-    cnrtGetDataShape(outputDesc, &outNum, &outChannel, &outHeight, &outWidth);
+    CNRT_CHECK(cnrtGetOutputDataShape(&(outDimValues_[i]),
+        &(outDimNums_[i]), i, function));
+    for (int j = 0; j < outDimNums_[i]; ++j) {
+      outCounts_[i] *= outDimValues_[i][j];
+      LOG(INFO) << "shape " << outDimValues_[i][j];
+    }
     outputCpuPtrS[i] =
-        reinterpret_cast<void*>(malloc(sizeof(float) * outputCount));
-    float* outputData = reinterpret_cast<float*>(outputCpuPtrS[i]);
-    yolov3_output_cpu.push_back(outputData);
-    shape.push_back(outNum);
-    shape.push_back(outChannel);
-    shape.push_back(outHeight);
-    shape.push_back(outWidth);
-    outputShape.push_back(shape);
-    outputCounts.push_back(outputCount);
-    LOG(INFO) << "output shape " << outNum;
-    LOG(INFO) << "output shape " << outChannel;
-    LOG(INFO) << "output shape " << outHeight;
-    LOG(INFO) << "output shape " << outWidth;
+        reinterpret_cast<void*>(malloc(sizeof(float) * outCounts_[i]));
+    outputSyncPtrS[i] =
+        reinterpret_cast<void**>(malloc(outputSizeArray[i]));
   }
 
   // 5. allocate I/O data space on MLU memory and copy Input data
-  cnrtMallocBatchByDescArray(&inputMluPtrS, inputDescS, inputNum, 1);
-  cnrtMallocBatchByDescArray(&outputMluPtrS, outputDescS, outputNum, 1);
+  inputMluPtrS =
+    reinterpret_cast<void**>(malloc(sizeof(void*) * inputNum));
+  outputMluPtrS =
+    reinterpret_cast<void**>(malloc(sizeof(void*) * outputNum));
+  for (int i = 0; i < inputNum; i++) {
+    cnrtMalloc(&(inputMluPtrS[i]), inputSizeArray[i]);
+  }
+  for (int i = 0; i < outputNum; i++) {
+    cnrtMalloc(&(outputMluPtrS[i]), outputSizeArray[i]);
+  }
   cnrtCreateQueue(&cnrt_queue);
   setMean(meanFile, meanValues);
+  if (cnrtCreateRuntimeContext(&rt_ctx, function, nullptr) != CNRT_RET_SUCCESS) {
+    LOG(FATAL)<< "Failed to create runtime context";
+  }
+
+  // set device ordinal. if not set, a random device will be used
+  cnrtSetRuntimeContextDeviceId(rt_ctx, FLAGS_mludevice);
+  // Instantiate the runtime context on actual MLU device
+  // All cnrtSetRuntimeContext* interfaces must be caller prior to cnrtInitRuntimeContext
+  if (cnrtInitRuntimeContext(rt_ctx, nullptr) != CNRT_RET_SUCCESS) {
+    LOG(FATAL)<< "Failed to initialize runtime context";
+  }
 }
 
 Detector::~Detector() {
@@ -236,6 +229,13 @@ Detector::~Detector() {
     for (int i = 0; i < inputNum; i++) {
       if (inputCpuPtrS[i] != NULL) free(inputCpuPtrS[i]);
     }
+    free(inputCpuPtrS);
+  }
+  if (inputSyncPtrS != NULL) {
+    for (int i = 0; i < inputNum; i++) {
+      if (inputSyncPtrS[i] != NULL) free(inputSyncPtrS[i]);
+    }
+    free(inputSyncPtrS);
   }
   if (outputCpuPtrS != NULL) {
     for (int i = 0; i < outputNum; i++) {
@@ -243,408 +243,129 @@ Detector::~Detector() {
     }
     free(outputCpuPtrS);
   }
+  if (outputSyncPtrS != NULL) {
+    for (int i = 0; i < outputNum; i++) {
+      if (outputSyncPtrS[i] != NULL) free(outputSyncPtrS[i]);
+    }
+    free(outputSyncPtrS);
+  }
+  if (inputMluPtrS != NULL) {
+    for (int i = 0; i < inputNum; i++) {
+      if (inputMluPtrS[i] != NULL) {
+        cnrtFree(inputMluPtrS[i]);
+      }
+    }
+    free(inputMluPtrS);
+  }
+  if (outputMluPtrS != NULL) {
+    for (int i = 0; i < outputNum; i++) {
+      if (outputMluPtrS[i] != NULL) {
+        cnrtFree(outputMluPtrS[i]);
+      }
+    }
+    free(outputMluPtrS);
+  }
+
   cnrtDestroyQueue(cnrt_queue);
   cnrtDestroyFunction(function);
   // unload model
   cnrtUnloadModel(model);
+  cnrtDestroyRuntimeContext(rt_ctx);
 }
 
-// obtain 1x255x13x13 blob data
-// return 155 * 169
-vector<vector<float>> get_blob_data(
-    const vector<int>& yolov3_shape, const float* result_buffer,
-    int batch) {
-  int batchs = yolov3_shape[0] / batch;
-  int channels = yolov3_shape[1];
-  int width = yolov3_shape[2];
-  int height = yolov3_shape[3];
-  vector<vector<float>> output_data(channels, vector<float>(width * height));
-  for (int n = 0; n < batchs; ++n) {
-    for (int c = 0; c < channels; ++c) {
-      for (int h = 0; h < height; ++h) {
-        for (int w = 0; w < width; ++w) {
-          output_data[c][h * width + w] =
-              result_buffer[c * height * width + h * width + w];
-        }
-      }
-    }
-  }
-  return output_data;
-}
-
-// transpose two vector  255*169->169*255
-void transpose(const vector<vector<float>>& A, vector<vector<float>>* B) {
-  if (A.size() == 0) {
-    LOG(FATAL) << "input vector is equal to 0" << std::endl;
-  }
-  vector<vector<float>> C(A[0].size());
-  for (int i = 0; i < C.size(); i++) C[i].resize(A.size());
-  for (int i = 0; i < A[0].size(); i++) {
-    for (int j = 0; j < A.size(); j++) {
-      C[i][j] = A[j][i];
-    }
-  }
-  *B = std::move(C);
-}
-
-// reshape two vector
-void matrixReshape(vector<vector<float>> A, vector<vector<float>>* B,
-                   int r, int c) {
-  int m = A.size(), n = A[0].size();
-  if (m * n != r * c) {
-    *B = std::move(A);
-  } else {
-    vector<vector<float>> C(r);
-    for (int x = 0; x < C.size(); x++) C[x].resize(c);
-    for (int i = 0; i < r; ++i) {
-      for (int j = 0; j < c; ++j) {
-        int k = i * c + j;
-        C[i][j] = static_cast<float>(A[k / n][k % n]);
-      }
-    }
-    *B = std::move(C);
-  }
-}
-
-// sigmoid two vector
-void sigmoid(vector<vector<float>>* B, int col) {
-  vector<vector<float>>::iterator it_begin = B->begin();
-  for (; it_begin != B->end(); ++it_begin) {
-    for (int i = col; i < col + 1; i++) {
-      (*it_begin)[i] = 1 / (1 + std::exp(-(*it_begin)[i]));
-    }
-  }
-}
-
-void matrixAdd(vector<vector<float>>* a, const vector<vector<float>>& b,
-               int numberOfRows, int selectColsLeft, int selectColsRight) {
-  for (int i = 0; i < numberOfRows; i++) {
-    for (int j = selectColsLeft; j < selectColsRight; j++) {
-      (*a)[i][j] = (*a)[i][j] + b[i][j];
-    }
-  }
-}
-
-// sigmoid two vector
-void sigmoid(vector<vector<float>>* B, int colsLeft, int colsRight) {
-  vector<vector<float>>::iterator it_begin = B->begin();
-  for (; it_begin != B->end(); ++it_begin) {
-    for (int i = colsLeft; i < colsRight; i++) {
-      (*it_begin)[i] = 1 / (1 + std::exp(-(*it_begin)[i]));
-    }
-  }
-}
-
-void matrixMulti(vector<vector<float>>* a, const vector<vector<float>>& b,
-                 int numberOfRows, int selectColsLeft, int selectColsRight) {
-  for (int i = 0; i < numberOfRows; i++)
-    for (int j = selectColsLeft; j < selectColsRight; j++)
-      (*a)[i][j] = std::exp((*a)[i][j]) * b[i][j - selectColsLeft];
-}
-
-void matrixMulti(vector<vector<float>>* a, int b, int numberOfRows,
-                 int selectColsLeft, int selectColsRight) {
-  for (int i = 0; i < numberOfRows; i++)
-    for (int j = selectColsLeft; j < selectColsRight; j++)
-      (*a)[i][j] = (*a)[i][j] * b;
-}
-
-void transform_tensor(vector<vector<float>> tensor_output,
-                      vector<vector<float>>* tensor_data,
-                      int num_classes,
-                      vector<vector<float>> x_y_offset,
-                      vector<vector<float>> anchor_tensor) {
-  int input_dim = 416;
-  int stride = input_dim / std::sqrt(tensor_output[0].size());  // 32
-  int gride_size = input_dim / stride;  // 13
-  int bbox_attrs = 5 + num_classes;  // 85
-  int anchor_num = 3;
-
-  vector<vector<float>> tensor_trans;
-  transpose(tensor_output, &tensor_trans);  // 255*169->169*255
-
-  matrixReshape(tensor_trans, tensor_data, gride_size * gride_size * anchor_num,
-                bbox_attrs);  // 169*255->507*85
-
-  sigmoid(tensor_data, 0);
-  sigmoid(tensor_data, 1);
-  sigmoid(tensor_data, 4);
-
-  matrixAdd(tensor_data, x_y_offset, tensor_data->size(), 0, 2);
-  matrixMulti(tensor_data, anchor_tensor, tensor_data->size(), 2, 4);
-  sigmoid(tensor_data, 5, 85);
-  matrixMulti(tensor_data, stride, tensor_data->size(), 0, 4);
-}
-
-void concatenate(vector<vector<float>>* all_boxes,
-                 const vector<vector<float>>& boxes_13,
-                 const vector<vector<float>>& boxes_26,
-                 const vector<vector<float>>& boxes_52) {
-  vector<vector<float>> temp(
-      (boxes_13.size() + boxes_26.size() + boxes_52.size()),
-      vector<float>(boxes_13[0].size(), 0));
-  for (int j = 0; j < temp.size(); j++) {
-    for (int k = 0; k < temp[0].size(); k++) {
-      if (j < boxes_13.size()) {
-        temp[j][k] = boxes_13[j][k];
-      } else {
-        if (j >= boxes_13.size() && j < (boxes_13.size() + boxes_26.size())) {
-          temp[j][k] = boxes_26[j - boxes_13.size()][k];
-        } else {
-          temp[j][k] = boxes_52[j - (boxes_13.size() + boxes_26.size())][k];
-        }
-      }
-    }
-  }
-  *all_boxes = std::move(temp);
-}
-
-void fill_zeros(vector<vector<float>>* all_boxes, int cols, float confidence) {
-  for (int i = 0; i < all_boxes->size(); i++) {
-    if ((*all_boxes)[i][cols] > confidence)
-      continue;
-    else
-      (*all_boxes)[i][cols] = 0;
-  }
-}
-
-vector<vector<float>> filter_boxes(vector<vector<float>>* all_boxes,
-                                   vector<float>* max_class_score,
-                                   vector<float>* max_class_idx) {
-  vector<vector<float>> temp(all_boxes->size(), vector<float>(5 + 2, 0));
-  for (int i = 0; i < all_boxes->size(); i++) {
-    for (int j = 0; j < 7; j++) {
-      if (j < 5)
-        temp[i][j] = (*all_boxes)[i][j];
-      else if (j == 5)
-        temp[i][j] = (*max_class_score)[i];
-      else if (j == 6)
-        temp[i][j] = (*max_class_idx)[i];
-      else
-        LOG(FATAL) << " filter_boxes index error ";
-    }
-  }
-  vector<vector<float>> vec;
-  for (int m = 0; m < temp.size(); m++) {
-    if (temp[m][4] == 0)
-      continue;
-    else
-      vec.push_back(temp[m]);
-  }
-  return vec;
-}
-
-void unique_vector(vector<vector<float>>* input_vector,
-                   vector<float>* output_vector) {
-  for (int i = 0; i < input_vector->size(); i++) {
-    (*output_vector).push_back((*input_vector)[i][6]);
-  }
-  sort((*output_vector).begin(), (*output_vector).end());
-  auto new_end = unique((*output_vector).begin(), (*output_vector).end());
-  (*output_vector).erase(new_end, (*output_vector).end());
-}
-
-float findMax(vector<float> vec) {
-  float max = -999;
-  for (auto v : vec) {
-    if (max < v) max = v;
-  }
-  return max;
-}
-
-int getPositionOfMax(vector<float> vec, float max) {
-  auto distance = find(vec.begin(), vec.end(), max);
-  return distance - vec.begin();
-}
-
-void nms_by_classes(vector<vector<float>> sort_boxes, vector<float>* ious,
-                    int start) {
-  for (int i = start + 1; i < sort_boxes.size(); i++) {
-    float first_x1 = sort_boxes[start][0];
-    float first_y1 = sort_boxes[start][1];
-    float first_x2 = sort_boxes[start][2];
-    float first_y2 = sort_boxes[start][3];
-
-    float next_x1 = sort_boxes[i][0];
-    float next_y1 = sort_boxes[i][1];
-    float next_x2 = sort_boxes[i][2];
-    float next_y2 = sort_boxes[i][3];
-
-    float inter_x1 = std::max(first_x1, next_x1);
-    float inter_y1 = std::max(first_y1, next_y1);
-    float inter_x2 = std::min(first_x2, next_x2);
-    float inter_y2 = std::min(first_y2, next_y2);
-    float inter_area, first_area, next_area, union_area, iou;
-    if ((inter_x2 - inter_x1 + 1 > 0) && (inter_y2 - inter_y1 + 1 > 0))
-      inter_area = (inter_x2 - inter_x1 + 1) * (inter_y2 - inter_y1 + 1);
-    else
-      inter_area = 0;
-    first_area = (first_x2 - first_x1 + 1) * (first_y2 - first_y1 + 1);
-    next_area = (next_x2 - next_x1 + 1) * (next_y2 - next_y1 + 1);
-    union_area = first_area + next_area - inter_area;
-    iou = inter_area / union_area;
-    (*ious).push_back(iou);
-  }
-}
-
-void get_detection(vector<vector<float>> all_boxes,
-                   vector<vector<float>>* final_boxes, int num_classes,
-                   float confidence, float nms_thresh) {
-  fill_zeros(&all_boxes, 4, confidence);
-  vector<vector<float>> boxes_copy;
-  boxes_copy = all_boxes;
-  for (int i = 0; i < all_boxes.size(); i++) {
-    all_boxes[i][0] = boxes_copy[i][0] - boxes_copy[i][2] / 2;
-    all_boxes[i][1] = boxes_copy[i][1] - boxes_copy[i][3] / 2;
-    all_boxes[i][2] = boxes_copy[i][0] + boxes_copy[i][2] / 2;
-    all_boxes[i][3] = boxes_copy[i][1] + boxes_copy[i][3] / 2;
-  }
-
-  vector<float> max_class_idx;
-  vector<float> max_class_score;
-  for (int j = 0; j < all_boxes.size(); j++) {
-    vector<float>::iterator biggest =
-        std::max_element(std::begin(all_boxes[j]) + 5, std::end(all_boxes[j]));
-    max_class_score.push_back(*biggest);
-    max_class_idx.push_back(
-        std::distance(std::begin(all_boxes[j]) + 5, biggest));
-  }
-
-  vector<vector<float>> boxes_cleaned;
-  boxes_cleaned = filter_boxes(&all_boxes, &max_class_score, &max_class_idx);
-  vector<float> unique_classes;
-  unique_vector(&boxes_cleaned, &unique_classes);
-  vector<vector<float>> curr_classes;
-  for (auto v : unique_classes) {
-    for (int m = 0; m < boxes_cleaned.size(); m++) {
-      if (boxes_cleaned[m][6] == v)
-        curr_classes.push_back(boxes_cleaned[m]);
-      else
-        continue;
-    }
-    vector<float> object_score;
-    for (int n = 0; n < curr_classes.size(); n++) {
-      object_score.push_back(curr_classes[n][4]);
-    }
-    vector<float> sort_score, sort_idx;
-    for (int i = 0; i < object_score.size(); i++) {
-      float maxNumber = findMax(object_score);
-      sort_score.push_back(maxNumber);
-      int maxIndex = getPositionOfMax(object_score, maxNumber);
-      sort_idx.push_back(maxIndex);
-      object_score[maxIndex] = -999;
-    }
-    vector<vector<float>> sort_boxes;
-    for (int j = 0; j < sort_idx.size(); j++) {
-      sort_boxes.push_back(curr_classes[sort_idx[j]]);
-    }
-    vector<float> ious;
-    for (int k = 0; k < sort_boxes.size(); k++) {
-      ious.clear();
-      nms_by_classes(sort_boxes, &ious, k);
-      int dele_number = 0;
-
-      for (int s = 0; s < ious.size(); s++) {
-        if (ious[s] > nms_thresh) {
-          sort_boxes.erase(sort_boxes.begin() + k - dele_number + 1 + s);
-          dele_number = dele_number + 1;
-        } else {
-          continue;
-        }
-      }
-    }
-    for (int t = 0; t < sort_boxes.size(); t++) {
-      (*final_boxes).push_back(sort_boxes[t]);
-    }
-    curr_classes.clear();
-    object_score.clear();
-    sort_score.clear();
-    sort_idx.clear();
-    sort_boxes.clear();
-  }
-}
-
-vector<vector<vector<float>>> Detector::detect(
-    const vector<cv::Mat>& images,
-    const vector<vector<vector<float>>>& x_y_offsets,
-    const vector<vector<vector<float>>>& anchor_tensors) {
+vector<vector<vector<float>>> Detector::detect(const vector<cv::Mat>& images) {
   vector<vector<cv::Mat>> inputImages;
   wrapInputLayer(&inputImages);
   preProcess(images, &inputImages);
   cnrtNotifier_t notifierBeginning, notifierEnd;
   cnrtCreateNotifier(&notifierBeginning);
   cnrtCreateNotifier(&notifierEnd);
-  float eventTimeUse;
-  cnrtMemcpyBatchByDescArray(inputMluPtrS, inputCpuPtrS, inputDescS, inputNum,
-                             1, CNRT_MEM_TRANS_DIR_HOST2DEV);
+  float eventTimeUse = 0;
+
+  cnrtDataType_t inputCpuDtype = CNRT_FLOAT32;
+  cnrtDataType_t inputMluDtype = inputDataTypeArray[0];
+  int dimValuesCpu[4] = {inDimValues_[0][0], inDimValues_[0][3],
+                         inDimValues_[0][1], inDimValues_[0][2]};
+  int dimOrder[4] = {0, 2, 3, 1};  // NCHW --> NHWC
+  if (inputCpuDtype != inputMluDtype) {
+    CNRT_CHECK(cnrtTransOrderAndCast(inputCpuPtrS[0], inputCpuDtype,
+          inputSyncPtrS[0], inputMluDtype, nullptr, 4, dimValuesCpu, dimOrder));
+  } else {
+    CNRT_CHECK(cnrtTransDataOrder(inputCpuPtrS[0], inputCpuDtype,
+          inputSyncPtrS[0], 4, dimValuesCpu, dimOrder));
+  }
+  CNRT_CHECK(cnrtMemcpy(inputMluPtrS[0], inputSyncPtrS[0],
+        inputSizeArray[0], CNRT_MEM_TRANS_DIR_HOST2DEV));
 
   param =
       reinterpret_cast<void**>(malloc(sizeof(void*) * (inputNum + outputNum)));
   for (int i = 0; i < inputNum; i++) param[i] = inputMluPtrS[i];
   for (int i = 0; i < outputNum; i++) param[i + inputNum] = outputMluPtrS[i];
 
-  cnrtInvokeFuncParam_t invokeFuncParam;
-  cnrtDim3_t dim = {1, 1, 1};
-  unsigned int affinity = 0x01;
-  int dp = 1;
-  invokeFuncParam.data_parallelism = &dp;
-  invokeFuncParam.affinity = &affinity;
-  invokeFuncParam.end = CNRT_PARAM_END;
-  cnrtFunctionType_t funcType = (cnrtFunctionType_t)0;
-  
-#if defined(CROSS_COMPILE) || defined(CROSS_COMPILE_ARM64)
-    struct timeval tpend, tpstart;
-      gettimeofday(&tpstart, NULL);
-#endif
+
   cnrtPlaceNotifier(notifierBeginning, cnrt_queue);
-  CNRT_CHECK(cnrtInvokeFunction_V2(function, dim, param, funcType, cnrt_queue,
-                                &invokeFuncParam));
+  CNRT_CHECK(cnrtInvokeRuntimeContext(rt_ctx, param, cnrt_queue, nullptr));
   cnrtPlaceNotifier(notifierEnd, cnrt_queue);
-#if defined(CROSS_COMPILE) || defined(CROSS_COMPILE_ARM64)
-  gettimeofday(&tpend, NULL);
-#endif
   if (cnrtSyncQueue(cnrt_queue) == CNRT_RET_SUCCESS) {
     cnrtNotifierDuration(notifierBeginning, notifierEnd, &eventTimeUse);
-#if defined(CROSS_COMPILE) || defined(CROSS_COMPILE_ARM64)
-    eventTimeUse = 1000000 * (tpend.tv_sec - tpstart.tv_sec) +
-      tpend.tv_usec - tpstart.tv_usec;
-#endif
     printfMluTime(eventTimeUse);
     mlu_time += eventTimeUse;
   } else {
     LOG(INFO) << " SyncQueue error ";
   }
 
-  cnrtMemcpyBatchByDescArray(outputCpuPtrS, outputMluPtrS, outputDescS,
-                             outputNum, 1, CNRT_MEM_TRANS_DIR_DEV2HOST);
+  CNRT_CHECK(cnrtMemcpy(outputSyncPtrS[0], outputMluPtrS[0],
+        outputSizeArray[0], CNRT_MEM_TRANS_DIR_DEV2HOST));
+  cnrtDataType_t outputCpuDtype = CNRT_FLOAT32;
+  cnrtDataType_t outputMluDtype = outputDataTypeArray[0];
+  int dimValuesMlu[4] = {outDimValues_[0][0], outDimValues_[0][1],
+                         outDimValues_[0][2], outDimValues_[0][3]};
+  int dimOrderMlu[4] = {0, 3, 1, 2};  // NHWC --> NCHW
+  if (outputCpuDtype != outputMluDtype) {
+    CNRT_CHECK(cnrtTransOrderAndCast(outputSyncPtrS[0], outputMluDtype,
+          outputCpuPtrS[0], outputCpuDtype, nullptr, 4, dimValuesMlu, dimOrderMlu));
+  } else {
+    CNRT_CHECK(cnrtTransDataOrder(outputSyncPtrS[0], outputCpuDtype,
+          outputCpuPtrS[0], 4, dimValuesMlu, dimOrderMlu));
+  }
 
   /* copy the output layer to a vector*/
-  /* 255 * 169  */
-  /* 255 * 676  */
-  /* 255 * 2704 */
   vector<vector<vector<float>>> final_boxes;
-  for (int m = 0; m < inputShape[0]; m++) {
-    tensors.clear();
-    vector<vector<float>> tensor;
-    for (int i = 0; i < outputNum; i++) {
-      int singleCount = outputCounts[i] / inputShape[0];
-      float* outputData = reinterpret_cast<float*>(outputCpuPtrS[i]);
-      tensor = get_blob_data(outputShape[i], outputData + m * singleCount, inputShape[0]);
-      tensors.push_back(tensor);
+  const float* outputData = reinterpret_cast<float*>(outputCpuPtrS[0]);
+  vector<float> single_box;
+  vector<vector<float>> batch_box;
+  int count = outDimValues_[0][3];
+  for (int b = 0; b < batchSize; b++) {
+    batch_box.clear();
+    int num_boxes = static_cast<int>(outputData[b * count]);
+    if (num_boxes > 1024) {
+        LOG(INFO) << "num_boxes : " << num_boxes;
+        num_boxes = 1024;
     }
-
-    vector<vector<vector<float>>> three_boxes;
-    three_boxes.resize(3);
-    for (int i = 0; i < 3; i++) {
-      transform_tensor(tensors[i], &three_boxes[i], 80, x_y_offsets[i],
-                       anchor_tensors[i]);
+    for (int k = 0; k < num_boxes; k++) {
+      int index = b * count + 64 + k * 7;
+      single_box.clear();
+      float max_limit = 1;
+      float min_limit = 0;
+      float bl = std::max(
+          min_limit, std::min(max_limit, outputData[index + 3]));  // x1
+      float br = std::max(
+          min_limit, std::min(max_limit, outputData[index + 5]));  // x2
+      float bt = std::max(
+          min_limit, std::min(max_limit, outputData[index + 4]));  // y1
+      float bb = std::max(
+          min_limit, std::min(max_limit, outputData[index + 6]));  // y2
+      single_box.push_back(bl);
+      single_box.push_back(bt);
+      single_box.push_back(br);
+      single_box.push_back(bb);
+      single_box.push_back(outputData[index + 2]);
+      single_box.push_back(outputData[index + 1]);
+      if ((br - bl) > 0 && (bb - bt) > 0) {
+        batch_box.push_back(single_box);
+      }
     }
-    vector<vector<float>> all_boxes, tmp_boxes;
-
-    // 10647*85
-    concatenate(&all_boxes, three_boxes[0], three_boxes[1], three_boxes[2]);
-    get_detection(all_boxes, &tmp_boxes, 80, FLAGS_confidence, FLAGS_nmsthresh);
-    final_boxes.push_back(tmp_boxes);
+    final_boxes.push_back(batch_box);
   }
   return final_boxes;
 }
@@ -701,9 +422,9 @@ void Detector::preProcess(const vector<cv::Mat>& images,
       << "Size of imgs and input_imgs doesn't match";
   for (int i = 0; i < images.size(); ++i) {
     cv::Mat sample;
-    int num_channels_ = inputShape[1];
+    int num_channels_ = inDimValues_[0][3];
     cv::Size input_geometry;
-    input_geometry = cv::Size(inputShape[2], inputShape[3]);  // 416*416
+    input_geometry = cv::Size(inDimValues_[0][1], inDimValues_[0][2]);  // 416*416
     if (images[i].channels() == 3 && num_channels_ == 1)
       cv::cvtColor(images[i], sample, cv::COLOR_BGR2GRAY);
     else if (images[i].channels() == 4 && num_channels_ == 1)
@@ -712,13 +433,17 @@ void Detector::preProcess(const vector<cv::Mat>& images,
       cv::cvtColor(images[i], sample, cv::COLOR_BGRA2BGR);
     else if (images[i].channels() == 1 && num_channels_ == 3)
       cv::cvtColor(images[i], sample, cv::COLOR_GRAY2BGR);
+    else if (images[i].channels() == 3 && num_channels_ == 4)
+      cv::cvtColor(images[i], sample, cv::COLOR_BGR2BGRA);
+    else if (images[i].channels() == 1 && num_channels_ == 4)
+      cv::cvtColor(images[i], sample, cv::COLOR_GRAY2BGRA);
     else
       sample = images[i];
 
     // 2.resize the image
     cv::Mat sample_temp;
-    int input_dim = inputShape[2];
-    cv::Mat sample_resized(input_dim, input_dim, CV_8UC3,
+    int input_dim = inDimValues_[0][1];
+    cv::Mat sample_resized(input_dim, input_dim, CV_8UC4,
                            cv::Scalar(128, 128, 128));
     if (sample.size() != input_geometry) {
       // resize
@@ -742,12 +467,17 @@ void Detector::preProcess(const vector<cv::Mat>& images,
 
     // 3.BGR->RGB
     cv::Mat sample_rgb;
-    cv::cvtColor(sample_resized, sample_rgb, cv::COLOR_BGR2RGB);
+    if (num_channels_ == 4)
+      cv::cvtColor(sample_resized, sample_rgb, cv::COLOR_BGRA2RGBA);
+    else
+      cv::cvtColor(sample_resized, sample_rgb, cv::COLOR_BGR2RGB);
+
     // 4.convert to float
     cv::Mat sample_float;
     if (num_channels_ == 3)
-      // 1/255.0
       sample_rgb.convertTo(sample_float, CV_32FC3, 1);
+    else if (num_channels_ == 4)
+      sample_rgb.convertTo(sample_float, CV_32FC4, 1);
     else
       sample_rgb.convertTo(sample_float, CV_32FC1, 1);
 
@@ -785,38 +515,10 @@ void Detector::readImages(queue<string>* imagesQueue, int inputNumber,
   }
 }
 
-void readtxt(vector<vector<vector<float>>>* x_y_offsets,
-             vector<vector<vector<float>>>* anchor_tensors,
-             vector<int> size_rows, vector<string> anchor_strs) {
-  int size = x_y_offsets->size();
-  for (int i = 0; i < size; i++) {
-    std::ifstream infile_1;
-    string filename_1 = FLAGS_bboxanchordir + "/x_y_offset_"
-        + anchor_strs[i] + ".txt";
-    infile_1.open(filename_1);
-    for (int m = 0; m < size_rows[i]; m++) {
-      for (int n = 0; n < 2; n++) {
-        infile_1 >> (*x_y_offsets)[i][m][n];
-      }
-    }
-    infile_1.close();
-    std::ifstream infile_2;
-    string filename_2 = FLAGS_bboxanchordir +  "/anchors_tensor_"
-        + anchor_strs[i] + ".txt";
-    infile_2.open(filename_2);
-    for (int m = 0; m < size_rows[i]; m++) {
-      for (int n = 0; n < 2; n++) {
-        infile_2 >> (*anchor_tensors)[i][m][n];
-      }
-    }
-  }
-}
-
 static void WriteVisualizeBBox_offline(
     const vector<cv::Mat>& images,
     const vector<vector<vector<float>>> detections,
-    const vector<string>& labelToDisplayName,
-    const vector<string>& imageNames,
+    const vector<string>& labelToDisplayName, const vector<string>& imageNames,
     int input_dim) {
   // Retrieve detections.
   const int imageNumber = images.size();
@@ -830,6 +532,7 @@ static void WriteVisualizeBBox_offline(
     if (positionMap > 0 && positionMap < imageNames[i].size()) {
       name = name.substr(positionMap + 1);
     }
+    LOG(INFO) << "detect image: " << name;
     positionMap = name.rfind(".");
     if (positionMap > 0 && positionMap < name.size()) {
       name = name.substr(0, positionMap);
@@ -838,73 +541,59 @@ static void WriteVisualizeBBox_offline(
     std::ofstream fileMap(name);
 
     float scaling_factors = std::min(
-        static_cast<float>(input_dim) / static_cast<float>(images[i].cols),
-        static_cast<float>(input_dim) / static_cast<float>(images[i].rows));
-
+        static_cast<float>(input_dim) / static_cast<float>(image.cols),
+        static_cast<float>(input_dim) / static_cast<float>(image.rows));
     for (int j = 0; j < result.size(); j++) {
       result[j][0] =
-          result[j][0] -
-          static_cast<float>(input_dim - scaling_factors * images[i].cols) /
-              2.0;
+          result[j][0] * input_dim -
+          static_cast<float>(input_dim - scaling_factors * image.cols) / 2.0;
       result[j][2] =
-          result[j][2] -
-          static_cast<float>(input_dim - scaling_factors * images[i].cols) /
-              2.0;
+          result[j][2] * input_dim -
+          static_cast<float>(input_dim - scaling_factors * image.cols) / 2.0;
       result[j][1] =
-          result[j][1] -
-          static_cast<float>(input_dim - scaling_factors * images[i].rows) /
-              2.0;
+          result[j][1] * input_dim -
+          static_cast<float>(input_dim - scaling_factors * image.rows) / 2.0;
       result[j][3] =
-          result[j][3] -
-          static_cast<float>(input_dim - scaling_factors * images[i].rows) /
-              2.0;
+          result[j][3] * input_dim -
+          static_cast<float>(input_dim - scaling_factors * image.rows) / 2.0;
 
       for (int k = 0; k < 4; k++) {
         result[j][k] = result[j][k] / scaling_factors;
       }
     }
     for (int j = 0; j < result.size(); j++) {
-      // bounding boxes bundary check
       result[j][0] = result[j][0] < 0 ? 0 : result[j][0];
       result[j][2] = result[j][2] < 0 ? 0 : result[j][2];
       result[j][1] = result[j][1] < 0 ? 0 : result[j][1];
       result[j][3] = result[j][3] < 0 ? 0 : result[j][3];
-
-      result[j][0] =
-          result[j][0] > images[i].cols ? images[i].cols : result[j][0];
-      result[j][2] =
-          result[j][2] > images[i].cols ? images[i].cols : result[j][2];
-      result[j][1] =
-          result[j][1] > images[i].rows ? images[i].rows : result[j][1];
-      result[j][3] =
-          result[j][3] > images[i].rows ? images[i].rows : result[j][3];
+      result[j][0] = result[j][0] > image.cols ? image.cols : result[j][0];
+      result[j][2] = result[j][2] > image.cols ? image.cols : result[j][2];
+      result[j][1] = result[j][1] > image.rows ? image.rows : result[j][1];
+      result[j][3] = result[j][3] > image.rows ? image.rows : result[j][3];
     }
+    // getPointPosition(result, &p1, &p2, image.rows, image.cols);
     for (int j = 0; j < result.size(); j++) {
-      cv::Point p1(static_cast<int>(result[j][0]),
-                   static_cast<int>(result[j][1]));
-      cv::Point p2(static_cast<int>(result[j][2]),
-                   static_cast<int>(result[j][3]));
-      cv::rectangle(image, p1, p2, cv::Scalar(0, 0, 255), 1, 1, 0);
-      cv::Point p3(static_cast<int>(result[j][0]),
-                   static_cast<int>(result[j][1]) - 20);
-      cv::Point p4(static_cast<int>(result[j][0]) + 100,
-                   static_cast<int>(result[j][1]));
-      cv::rectangle(image, p3, p4, cv::Scalar(255, 0, 0), -1, 4);
+      int x0 = static_cast<int>(result[j][0]);
+      int y0 = static_cast<int>(result[j][1]);
+      int x1 = static_cast<int>(result[j][2]);
+      int y1 = static_cast<int>(result[j][3]);
+      cv::Point p1(x0, y0);
+      cv::Point p2(x1, y1);
+      cv::rectangle(image, p1, p2, cv::Scalar(0, 255, 0), 2);
       stringstream ss;
       ss << round(result[j][4] * 1000) / 1000.0;
       std::string str =
-          labelToDisplayName[static_cast<int>(result[j][6])] + ":" + ss.str();
-      cv::Point p5(static_cast<int>(result[j][0]),
-                   static_cast<int>(result[j][1]) - 1);
+          labelToDisplayName[static_cast<int>(result[j][5])] + ":" + ss.str();
+      cv::Point p5(x0, y0 - 5);
       cv::putText(image, str, p5, cv::FONT_HERSHEY_SIMPLEX, 0.5,
-                  cv::Scalar(255, 215, 0), 1);
-
-      fileMap << labelToDisplayName[static_cast<int>(result[j][6])] << " "
-              << ss.str() << " " << static_cast<float>(p1.x) / image.cols << " "
-              << static_cast<float>(p1.y) / image.rows << " "
-              << static_cast<float>(p2.x) / image.cols << " "
-              << static_cast<float>(p2.y) / image.rows << " " << image.cols
-              << " " << image.rows << std::endl;
+                  cv::Scalar(255, 0, 0), 1);
+      fileMap << labelToDisplayName[static_cast<int>(result[j][5])] << " "
+              << ss.str() << " "
+              << static_cast<float>(result[j][0]) / image.cols << " "
+              << static_cast<float>(result[j][1]) / image.rows << " "
+              << static_cast<float>(result[j][2]) / image.cols << " "
+              << static_cast<float>(result[j][3]) / image.rows << " "
+              << image.cols << " " << image.rows << "\n";
     }
     fileMap.close();
     stringstream ss;
@@ -915,16 +604,14 @@ static void WriteVisualizeBBox_offline(
     ss << path << fileName;
     ss >> outFile;
     cv::imwrite(outFile.c_str(), image);
-    cv::imwrite((FLAGS_outputdir + "/" + imageNames[i].c_str()), image);
   }
 }
 
 int main(int argc, char** argv) {
-{
-  const char * env = getenv("log_prefix");
-  if (!env || strcmp(env, "true") != 0)
-    FLAGS_log_prefix = false;
-}
+  {
+    const char* env = getenv("log_prefix");
+    if (!env || strcmp(env, "true") != 0) FLAGS_log_prefix = false;
+  }
   ::google::InitGoogleLogging(argv[0]);
 #ifndef GFLAGS_GFLAGS_H_
   namespace gflags = google;
@@ -971,19 +658,6 @@ int main(int argc, char** argv) {
   filesHandler.close();
   LOG(INFO) << "there are " << figuresNumber << " figures in " << FLAGS_images;
 
-  vector<int> size_row = {507, 2028, 8112};
-  vector<string> anchor_str = {"13", "26", "52"};
-  vector<vector<vector<float>>> x_y_offsets;
-  vector<vector<vector<float>>> anchor_tensors;
-  x_y_offsets.push_back(vector<vector<float>>(507, vector<float>(2)));
-  x_y_offsets.push_back(vector<vector<float>>(2028, vector<float>(2)));
-  x_y_offsets.push_back(vector<vector<float>>(8112, vector<float>(2)));
-  anchor_tensors.push_back(vector<vector<float>>(507, vector<float>(2)));
-  anchor_tensors.push_back(vector<vector<float>>(2028, vector<float>(2)));
-  anchor_tensors.push_back(vector<vector<float>>(8112, vector<float>(2)));
-
-  readtxt(&x_y_offsets, &anchor_tensors, size_row, anchor_str);
-
   /* Detecting images */
   float timeUse;
   float totalTime = 0;
@@ -998,14 +672,12 @@ int main(int argc, char** argv) {
     detector->readImages(&imageListQueue, detector->getBatchSize(), &images,
                          &imageNames);
     /* Secondly fill images into input blob and do net forwarding */
-    vector<vector<vector<float>>> detections =
-        detector->detect(images, x_y_offsets, anchor_tensors);
-
+    vector<vector<vector<float>>> detections = detector->detect(images);
 
     if (FLAGS_dump) {
       if (!FLAGS_outputdir.empty()) {
         WriteVisualizeBBox_offline(images, detections, labels, imageNames,
-                detector->inputDim());
+                                   detector->inputDim());
       }
     }
     gettimeofday(&tpEnd, NULL);
@@ -1014,13 +686,18 @@ int main(int argc, char** argv) {
     totalTime += timeUse;
     LOG(INFO) << "Detecting execution time: " << timeUse << " us";
     for (int num = 0; num < detector->getBatchSize(); num++) {
-      LOG(INFO) << "object is : " << detections[num].size();
+      LOG(INFO) << "detection size : " << detections[num].size();
     }
+    LOG(INFO) << "\n";
     images.clear();
     imageNames.clear();
   }
   LOG(INFO) << "Total execution time: " << totalTime << " us";
-  printPerf(figuresNumber, totalTime, detector->mluTime());
+  LOG(INFO) << "mluTime time: " << detector->mluTime() << " us";
+  int batchsize = detector->getBatchSize();
+  printPerf(figuresNumber, totalTime, detector->mluTime(), 1, batchsize);
+  saveResult(figuresNumber, (-1), (-1), (-1),
+      detector->mluTime(), totalTime, 1, batchsize);
   delete detector;
   cnrtDestroy();
   return 0;

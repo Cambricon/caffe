@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -288,7 +288,7 @@ class MLUNormalizeLayerTest : public MLUDeviceTest<TypeParam> {
     EXPECT_GE(this->blob_bottom_->num_axes(), 2);
   }
   void TestForward(bool channel_shared, bool across_spatial,
-                   Dtype eps) {
+                   Dtype eps, bool int8) {
     this->SetUp();
     LayerParameter layer_param;
     NormalizeParameter* normalize_param =
@@ -299,6 +299,18 @@ class MLUNormalizeLayerTest : public MLUDeviceTest<TypeParam> {
     normalize_param->set_allocated_scale_filler(normalize_filler_param);
     normalize_param->set_channel_shared(channel_shared);
     normalize_param->set_across_spatial(across_spatial);
+    if (int8) {  // int8
+      BlobDataType blob_dtype;
+      blob_dtype = get_quantized_info(*this->blob_bottom_,
+                                    layer_param, "common", DT_INT8);
+      layer_param.add_bottom_mlu_dtype()->CopyFrom(blob_dtype);
+      BlobDataType blobs_dtype;
+      blobs_dtype.set_type(DT_INT8);
+      blobs_dtype.add_position(-3);
+      blobs_dtype.add_scale(1.5875);
+      layer_param.add_bottom_mlu_dtype()->CopyFrom(blobs_dtype);
+      layer_param.add_blobs_dtype()->CopyFrom(blobs_dtype);
+    }
     MLUNormalizeLayer<Dtype> layer(layer_param);
     layer.SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
     layer.Reshape_dispatch(this->blob_bottom_vec_, this->blob_top_vec_);
@@ -384,7 +396,7 @@ class MLUNormalizeLayerTest : public MLUDeviceTest<TypeParam> {
     float err_sum = 0, sum = 0;
     for (int i = 0; i < blob_bottom_->count(); ++i) {
       Dtype err = (top_data[i] - temp_top_data[i]) / top_data[i];
-      EXPECT_LT(err,  0.12);
+      EXPECT_LT(err,  0.16);
       err_sum += std::abs(top_data[i] - temp_top_data[i]);
       sum += std::abs(temp_top_data[i]);
     }
@@ -419,28 +431,28 @@ TYPED_TEST(MLUNormalizeLayerTest, TestSetUp) {
   this->TestSetUp(channel_shared, across_spatial, eps);
 }
 
-TYPED_TEST(MLUNormalizeLayerTest, TestChannelShared) {
+TYPED_TEST(MLUNormalizeLayerTest, TestChannelSharedInt8) {
   typedef typename TypeParam::Dtype Dtype;
   bool channel_shared = true;
   bool across_spatial = false;
   Dtype eps = 1e-10;
-  this->TestForward(channel_shared, across_spatial, eps);
+  this->TestForward(channel_shared, across_spatial, eps, true);
 }
 
-TYPED_TEST(MLUNormalizeLayerTest, TestAcrossSpatial) {
+TYPED_TEST(MLUNormalizeLayerTest, TestAcrossSpatialInt8) {
   typedef typename TypeParam::Dtype Dtype;
   bool channel_shared = false;
   bool across_spatial = true;
   Dtype eps = 1e-10;
-  this->TestForward(channel_shared, across_spatial, eps);
+  this->TestForward(channel_shared, across_spatial, eps, true);
 }
 
-TYPED_TEST(MLUNormalizeLayerTest, TestEps) {
+TYPED_TEST(MLUNormalizeLayerTest, TestEpsInt8) {
   typedef typename TypeParam::Dtype Dtype;
   bool channel_shared = false;
   bool across_spatial = false;
   Dtype eps = 1e-11;
-  this->TestForward(channel_shared, across_spatial, eps);
+  this->TestForward(channel_shared, across_spatial, eps, true);
 }
 
 template <typename TypeParam>
@@ -469,7 +481,7 @@ class MFUSNormalizeLayerTest : public MFUSDeviceTest<TypeParam> {
     delete blob_ca_top_;
   }
   void TestForward(bool channel_shared, bool across_spatial,
-                   Dtype eps) {
+                   Dtype eps, bool int8) {
     this->SetUp();
     LayerParameter layer_param;
     NormalizeParameter* normalize_param =
@@ -480,6 +492,18 @@ class MFUSNormalizeLayerTest : public MFUSDeviceTest<TypeParam> {
     normalize_param->set_allocated_scale_filler(normalize_filler_param);
     normalize_param->set_channel_shared(channel_shared);
     normalize_param->set_across_spatial(across_spatial);
+    if (int8) {  // int8
+      BlobDataType blob_dtype;
+      blob_dtype = get_quantized_info(*this->blob_bottom_,
+                                    layer_param, "common", DT_INT8);
+      layer_param.add_bottom_mlu_dtype()->CopyFrom(blob_dtype);
+      BlobDataType blobs_dtype;
+      blobs_dtype.set_type(DT_INT8);
+      blobs_dtype.add_position(-3);
+      blobs_dtype.add_scale(1.5875);
+      layer_param.add_bottom_mlu_dtype()->CopyFrom(blobs_dtype);
+      layer_param.add_blobs_dtype()->CopyFrom(blobs_dtype);
+    }
     MLUNormalizeLayer<Dtype> layer(layer_param);
     layer.SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
     ASSERT_TRUE(layer.mfus_supported());
@@ -572,7 +596,7 @@ class MFUSNormalizeLayerTest : public MFUSDeviceTest<TypeParam> {
     float err_sum = 0, sum = 0;
     for (int i = 0; i < blob_bottom_->count(); ++i) {
       Dtype err = (top_data[i] - temp_top_data[i]) / top_data[i];
-      EXPECT_LT(err,  0.12);
+      EXPECT_LT(err,  0.16);
       err_sum += std::abs(top_data[i] - temp_top_data[i]);
       sum += std::abs(temp_top_data[i]);
     }
@@ -599,29 +623,30 @@ class MFUSNormalizeLayerTest : public MFUSDeviceTest<TypeParam> {
 
 TYPED_TEST_CASE(MFUSNormalizeLayerTest, TestMFUSDevices);
 
-TYPED_TEST(MFUSNormalizeLayerTest, TestChannelShared) {
+TYPED_TEST(MFUSNormalizeLayerTest, TestChannelSharedInt8) {
   typedef typename TypeParam::Dtype Dtype;
   bool channel_shared = true;
   bool across_spatial = false;
   Dtype eps = 1e-10;
-  this->TestForward(channel_shared, across_spatial, eps);
+  this->TestForward(channel_shared, across_spatial, eps, true);
 }
 
-TYPED_TEST(MFUSNormalizeLayerTest, TestAcrossSpatial) {
+TYPED_TEST(MFUSNormalizeLayerTest, TestAcrossSpatialInt8) {
   typedef typename TypeParam::Dtype Dtype;
   bool channel_shared = false;
   bool across_spatial = true;
   Dtype eps = 1e-10;
-  this->TestForward(channel_shared, across_spatial, eps);
+  this->TestForward(channel_shared, across_spatial, eps, true);
 }
 
-TYPED_TEST(MFUSNormalizeLayerTest, TestEps) {
+TYPED_TEST(MFUSNormalizeLayerTest, TestEpsInt8) {
   typedef typename TypeParam::Dtype Dtype;
   bool channel_shared = false;
   bool across_spatial = false;
   Dtype eps = 1e-11;
-  this->TestForward(channel_shared, across_spatial, eps);
+  this->TestForward(channel_shared, across_spatial, eps, true);
 }
+
 #endif
 
 }  // namespace caffe

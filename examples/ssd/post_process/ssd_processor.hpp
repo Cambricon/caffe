@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -48,11 +48,11 @@ class SsdProcessor : public PostProcessor<Dtype, Qtype> {
   virtual ~SsdProcessor() {}
   cv::Scalar HSV2RGB(const float h, const float s, const float v);
   vector<cv::Scalar> getColors(const int n);
-  void WriteVisualizeBBox_offline(const vector<cv::Mat>& images,
-                   const vector<vector<vector<float>>> detections,
+  void WriteVisualizeBBox(const vector<cv::Mat>& images,
+                   const vector<vector<vector<float>>>& detections,
                    const float threshold, const vector<cv::Scalar>& colors,
-                   const map<int, string>& labelNameMap,
-                   const vector<string>& names);
+                   const map<int, string>& labelNameMap, const vector<string>& names,
+                   const int& from, const int& to);
   void readLabels(map<int, string>* label_name_map);
 
   protected:

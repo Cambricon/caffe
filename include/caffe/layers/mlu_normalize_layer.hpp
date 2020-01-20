@@ -2,7 +2,7 @@
 All modification made by Cambricon Corporation: © 2018--2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -29,11 +29,9 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #ifndef INCLUDE_CAFFE_LAYERS_MLU_NORMALIZE_LAYER_HPP_
 #define INCLUDE_CAFFE_LAYERS_MLU_NORMALIZE_LAYER_HPP_
-
 #ifdef USE_MLU
 
 #include <vector>
-
 #include "caffe/blob.hpp"
 #include "caffe/layer.hpp"
 #include "caffe/layers/normalize_layer.hpp"
@@ -52,8 +50,8 @@ namespace caffe {
 template <typename Dtype>
 class MLUNormalizeLayer : public NormalizeLayer<Dtype> {
   public:
-  explicit MLUNormalizeLayer(const LayerParameter& param)
-      : NormalizeLayer<Dtype>(param), mlp_weight_blob_(nullptr),
+  explicit MLUNormalizeLayer(const LayerParameter &param)
+    : NormalizeLayer<Dtype>(param), mlp_weight_blob_(nullptr),
       mlp_bias_blob_(nullptr), eps_blob_(nullptr),
       div0_blob_(nullptr), mult_blob_(nullptr),
       gemv_weight_(nullptr), gemm_weight_(nullptr),
@@ -69,21 +67,27 @@ class MLUNormalizeLayer : public NormalizeLayer<Dtype> {
       reshape_op_ptr_(nullptr), reshape_param_(nullptr),
       reshape1_op_ptr_(nullptr), reshape1_param_(nullptr),
       reshape2_op_ptr_(nullptr), reshape2_param_(nullptr),
-      gemv_param_ptr_(nullptr), int8_mode(false) {}
-  virtual void LayerSetUp(const vector<Blob<Dtype>*>& bottom,
-                          const vector<Blob<Dtype>*>& top);
-  virtual void Reshape_tensor(const vector<Blob<Dtype>*>& bottom,
-                              const vector<Blob<Dtype>*>& top);
+      gemv_param_ptr_(nullptr), int8_mode(false),
+      trans_div1_d2h_layout_(nullptr), trans_div1_d2h_param_(nullptr),
+      trans_div1_h2d_layout_(nullptr), trans_div1_h2d_param_(nullptr),
+      trans_bMult_d2h_layout_(nullptr), trans_bMult_d2h_param_(nullptr),
+      trans_bMult_h2d_layout_(nullptr), trans_bMult_h2d_param_(nullptr),
+      trans_scale_d2h_layout_(nullptr), trans_scale_d2h_param_(nullptr),
+      trans_scale_h2d_layout_(nullptr), trans_scale_h2d_param_(nullptr) {}
+  virtual void LayerSetUp(const vector<Blob<Dtype> *> &bottom,
+                          const vector<Blob<Dtype> *> &top);
+  virtual void Reshape_tensor(const vector<Blob<Dtype> *> &bottom,
+                              const vector<Blob<Dtype> *> &top);
   virtual inline bool mfus_supported() { return true; }
-  virtual void fuse(MFusion<Dtype>* fuser);
+  virtual void fuse(MFusion<Dtype> *fuser);
   virtual ~MLUNormalizeLayer();
 
   protected:
-  virtual void Forward_mlu(const vector<Blob<Dtype>*>& bottom,
-                           const vector<Blob<Dtype>*>& top);
+  virtual void Forward_mlu(const vector<Blob<Dtype> *> &bottom,
+                           const vector<Blob<Dtype> *> &top);
   virtual void MLUDestroyOp();
-  virtual void MLUCreateOpBindData(const vector<Blob<Dtype>*>& bottom,
-                                   const vector<Blob<Dtype>*>& top);
+  virtual void MLUCreateOpBindData(const vector<Blob<Dtype> *> &bottom,
+                                   const vector<Blob<Dtype> *> &top);
   virtual void MLUCompileOp();
   Blob<Dtype> max_blob_;
   Blob<Dtype> index_blob_;
@@ -106,16 +110,16 @@ class MLUNormalizeLayer : public NormalizeLayer<Dtype> {
   Blob<Dtype> reshape1_blob_;  // reshape bottom[0]
   Blob<Dtype> reshape2_blob_;  // reshape scale_blob_
 
-  Blob<Dtype>* mlp_weight_blob_;
-  Blob<Dtype>* mlp_bias_blob_;
-  Blob<Dtype>* eps_blob_;
-  Blob<Dtype>* div0_blob_;  // the value is 1.0
-  Blob<Dtype>* mult_blob_;  // the value is blobs_[0]
+  Blob<Dtype> *mlp_weight_blob_;
+  Blob<Dtype> *mlp_bias_blob_;
+  Blob<Dtype> *eps_blob_;
+  Blob<Dtype> *div0_blob_;  // the value is 1.0
+  Blob<Dtype> *mult_blob_;  // the value is blobs_[0]
 
   // inner weights
-  Blob<Dtype>* gemv_weight_;
-  Blob<Dtype>* gemm_weight_;
-  Blob<Dtype>* gemm_matrix_;
+  Blob<Dtype> *gemv_weight_;
+  Blob<Dtype> *gemm_weight_;
+  Blob<Dtype> *gemm_matrix_;
 
   cnmlBaseOp_t max_op_ptr_;
   cnmlBaseOp_t power_op_ptr_;
@@ -135,7 +139,7 @@ class MLUNormalizeLayer : public NormalizeLayer<Dtype> {
   cnmlBaseOp_t cyclemult_op_ptr_;
   cnmlBaseOp_t mult1_op_ptr_;
 
-  cnmlBaseOp_t reshape_op_ptr_;   // div1_blob_   n,1,1,1 to 1,n,1,1
+  cnmlBaseOp_t reshape_op_ptr_;  // div1_blob_   n,1,1,1 to 1,n,1,1
   cnmlReshapeOpParam_t reshape_param_;
 
   cnmlBaseOp_t reshape1_op_ptr_;  // bottom[0]    n,c,h, w to 1, n, c*h, w
@@ -146,8 +150,26 @@ class MLUNormalizeLayer : public NormalizeLayer<Dtype> {
 
   cnmlConvOpParam_t gemv_param_ptr_;
   bool int8_mode;
+  vector<cnmlQuantizedParam_t> quant_params;
+  Blob<Dtype> div1_d2h_blob_;
+  Blob<Dtype> div1_h2d_blob_;
+  Blob<Dtype> bMult_d2h_blob_;
+  Blob<Dtype> bMult_h2d_blob_;
+  Blob<Dtype> scale_d2h_blob_;
+  Blob<Dtype> scale_h2d_blob_;
+  cnmlBaseOp_t trans_div1_d2h_layout_;  // NHWC --> NCHW
+  cnmlNdTransposeOpParam_t trans_div1_d2h_param_;
+  cnmlBaseOp_t trans_div1_h2d_layout_;  // NCHW --> NHWC
+  cnmlNdTransposeOpParam_t trans_div1_h2d_param_;
+  cnmlBaseOp_t trans_bMult_d2h_layout_;  // NHWC --> NCHW
+  cnmlNdTransposeOpParam_t trans_bMult_d2h_param_;
+  cnmlBaseOp_t trans_bMult_h2d_layout_;  // NCHW --> NHWC
+  cnmlNdTransposeOpParam_t trans_bMult_h2d_param_;
+  cnmlBaseOp_t trans_scale_d2h_layout_;  // NHWC --> NCHW
+  cnmlNdTransposeOpParam_t trans_scale_d2h_param_;
+  cnmlBaseOp_t trans_scale_h2d_layout_;  // NCHW --> NHWC
+  cnmlNdTransposeOpParam_t trans_scale_h2d_param_;
 };
-
 }  // namespace caffe
 #endif  // USE_MLU
 #endif  // INCLUDE_CAFFE_LAYERS_MLU_NORMALIZE_LAYER_HPP_

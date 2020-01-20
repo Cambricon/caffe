@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -437,6 +437,141 @@ TYPED_TEST(MLUReshapeLayerTest, TestForwardAfterReshape) {
   EVENT_TIME(layer.get_event_time());
 }
 
+TYPED_TEST(MLUReshapeLayerTest, TestForwardBottomAxes2) {
+  typedef typename TypeParam::Dtype Dtype;
+  LayerParameter layer_param;
+  BlobShape* shape = layer_param.mutable_reshape_param()->mutable_shape();
+  shape->add_dim(6);
+  shape->add_dim(2);
+  shape->add_dim(3);
+  shape->add_dim(5);
+  vector<int> bottom_shape = {3, 60};
+  this->blob_bottom_vec_[0]->Reshape(bottom_shape);
+  MLUReshapeLayer<Dtype> layer(layer_param);
+  layer.SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
+  layer.Reshape_dispatch(this->blob_bottom_vec_, this->blob_top_vec_);
+  layer.Forward(this->blob_bottom_vec_, this->blob_top_vec_);
+  for (int i = 0; i < this->blob_bottom_->count(); ++i) {
+    EXPECT_EQ(this->blob_top_->cpu_data()[i],
+              this->blob_bottom_->cpu_data()[i]);
+  }
+  std::ostringstream stream;
+  stream << "bottom1:" << this->blob_bottom_->shape_string().c_str();
+  BOTTOM(stream);
+  EVENT_TIME(layer.get_event_time());
+}
+
+TYPED_TEST(MLUReshapeLayerTest, TestForwardBottomAxes3) {
+  typedef typename TypeParam::Dtype Dtype;
+  LayerParameter layer_param;
+  BlobShape* shape = layer_param.mutable_reshape_param()->mutable_shape();
+  shape->add_dim(6);
+  shape->add_dim(2);
+  shape->add_dim(3);
+  shape->add_dim(5);
+  vector<int> bottom_shape = {3, 10, 6};
+  this->blob_bottom_vec_[0]->Reshape(bottom_shape);
+  MLUReshapeLayer<Dtype> layer(layer_param);
+  layer.SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
+  layer.Reshape_dispatch(this->blob_bottom_vec_, this->blob_top_vec_);
+  layer.Forward(this->blob_bottom_vec_, this->blob_top_vec_);
+  for (int i = 0; i < this->blob_bottom_->count(); ++i) {
+    EXPECT_EQ(this->blob_top_->cpu_data()[i],
+              this->blob_bottom_->cpu_data()[i]);
+  }
+  std::ostringstream stream;
+  stream << "bottom1:" << this->blob_bottom_->shape_string().c_str();
+  BOTTOM(stream);
+  EVENT_TIME(layer.get_event_time());
+}
+
+TYPED_TEST(MLUReshapeLayerTest, TestForwardBottomAxes5) {
+  typedef typename TypeParam::Dtype Dtype;
+  LayerParameter layer_param;
+  BlobShape* shape = layer_param.mutable_reshape_param()->mutable_shape();
+  shape->add_dim(6);
+  shape->add_dim(2);
+  shape->add_dim(3);
+  shape->add_dim(5);
+  vector<int> bottom_shape = {3, 2, 5, 3, 2};
+  this->blob_bottom_vec_[0]->Reshape(bottom_shape);
+  MLUReshapeLayer<Dtype> layer(layer_param);
+  layer.SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
+  layer.Reshape_dispatch(this->blob_bottom_vec_, this->blob_top_vec_);
+  layer.Forward(this->blob_bottom_vec_, this->blob_top_vec_);
+  for (int i = 0; i < this->blob_bottom_->count(); ++i) {
+    EXPECT_EQ(this->blob_top_->cpu_data()[i],
+              this->blob_bottom_->cpu_data()[i]);
+  }
+  std::ostringstream stream;
+  stream << "bottom1:" << this->blob_bottom_->shape_string().c_str();
+  BOTTOM(stream);
+  EVENT_TIME(layer.get_event_time());
+}
+
+TYPED_TEST(MLUReshapeLayerTest, TestForwardOutputAxes2) {
+  typedef typename TypeParam::Dtype Dtype;
+  LayerParameter layer_param;
+  BlobShape* shape = layer_param.mutable_reshape_param()->mutable_shape();
+  shape->add_dim(3);
+  shape->add_dim(60);
+  MLUReshapeLayer<Dtype> layer(layer_param);
+  layer.SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
+  layer.Reshape_dispatch(this->blob_bottom_vec_, this->blob_top_vec_);
+  layer.Forward(this->blob_bottom_vec_, this->blob_top_vec_);
+  for (int i = 0; i < this->blob_bottom_->count(); ++i) {
+    EXPECT_EQ(this->blob_top_->cpu_data()[i],
+              this->blob_bottom_->cpu_data()[i]);
+  }
+  std::ostringstream stream;
+  stream << "bottom1:" << this->blob_bottom_->shape_string().c_str();
+  BOTTOM(stream);
+  EVENT_TIME(layer.get_event_time());
+}
+
+TYPED_TEST(MLUReshapeLayerTest, TestForwardOutputAxes3) {
+  typedef typename TypeParam::Dtype Dtype;
+  LayerParameter layer_param;
+  BlobShape* shape = layer_param.mutable_reshape_param()->mutable_shape();
+  shape->add_dim(3);
+  shape->add_dim(10);
+  shape->add_dim(6);
+  MLUReshapeLayer<Dtype> layer(layer_param);
+  layer.SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
+  layer.Reshape_dispatch(this->blob_bottom_vec_, this->blob_top_vec_);
+  layer.Forward(this->blob_bottom_vec_, this->blob_top_vec_);
+  for (int i = 0; i < this->blob_bottom_->count(); ++i) {
+    EXPECT_EQ(this->blob_top_->cpu_data()[i],
+              this->blob_bottom_->cpu_data()[i]);
+  }
+  std::ostringstream stream;
+  stream << "bottom1:" << this->blob_bottom_->shape_string().c_str();
+  BOTTOM(stream);
+  EVENT_TIME(layer.get_event_time());
+}
+
+TYPED_TEST(MLUReshapeLayerTest, TestForwardOutputAxes5) {
+  typedef typename TypeParam::Dtype Dtype;
+  LayerParameter layer_param;
+  BlobShape* shape = layer_param.mutable_reshape_param()->mutable_shape();
+  shape->add_dim(3);
+  shape->add_dim(5);
+  shape->add_dim(2);
+  shape->add_dim(2);
+  shape->add_dim(3);
+  MLUReshapeLayer<Dtype> layer(layer_param);
+  layer.SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
+  layer.Reshape_dispatch(this->blob_bottom_vec_, this->blob_top_vec_);
+  layer.Forward(this->blob_bottom_vec_, this->blob_top_vec_);
+  for (int i = 0; i < this->blob_bottom_->count(); ++i) {
+    EXPECT_EQ(this->blob_top_->cpu_data()[i],
+              this->blob_bottom_->cpu_data()[i]);
+  }
+  std::ostringstream stream;
+  stream << "bottom1:" << this->blob_bottom_->shape_string().c_str();
+  BOTTOM(stream);
+  EVENT_TIME(layer.get_event_time());
+}
 template <typename TypeParam>
 class MFUSReshapeLayerTest : public MFUSDeviceTest<TypeParam> {
   typedef typename TypeParam::Dtype Dtype;
@@ -649,6 +784,190 @@ TYPED_TEST(MFUSReshapeLayerTest, TestForwardAfterReshape) {
   filler.Fill(this->blob_bottom_);
   ASSERT_TRUE(layer.mfus_supported());
 
+  layer.Reshape_dispatch(this->blob_bottom_vec_, this->blob_top_vec_);
+  layer.fuse(&fuser);
+  fuser.compile();
+  fuser.forward();
+  for (int i = 0; i < this->blob_bottom_->count(); ++i) {
+    EXPECT_EQ(this->blob_top_->cpu_data()[i],
+              this->blob_bottom_->cpu_data()[i]);
+  }
+  std::ostringstream stream;
+  stream << "bottom1:" << this->blob_bottom_->shape_string().c_str();
+  BOTTOM(stream);
+  EVENT_TIME(fuser.get_event_time());
+}
+
+TYPED_TEST(MFUSReshapeLayerTest, TestForwardBottomAxes2) {
+  typedef typename TypeParam::Dtype Dtype;
+  LayerParameter layer_param;
+  BlobShape* shape = layer_param.mutable_reshape_param()->mutable_shape();
+  shape->add_dim(6);
+  shape->add_dim(2);
+  shape->add_dim(3);
+  shape->add_dim(5);
+  vector<int> bottom_shape = {3, 60};
+  this->blob_bottom_vec_[0]->Reshape(bottom_shape);
+  MLUReshapeLayer<Dtype> layer(layer_param);
+  layer.SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
+  ASSERT_TRUE(layer.mfus_supported());
+
+  MFusion<Dtype> fuser;
+  fuser.reset();
+  fuser.addInputs(this->blob_bottom_vec_);
+  fuser.addOutputs(this->blob_top_vec_);
+  layer.Reshape_dispatch(this->blob_bottom_vec_, this->blob_top_vec_);
+  layer.fuse(&fuser);
+  fuser.compile();
+  fuser.forward();
+  for (int i = 0; i < this->blob_bottom_->count(); ++i) {
+    EXPECT_EQ(this->blob_top_->cpu_data()[i],
+              this->blob_bottom_->cpu_data()[i]);
+  }
+  std::ostringstream stream;
+  stream << "bottom1:" << this->blob_bottom_->shape_string().c_str();
+  BOTTOM(stream);
+  EVENT_TIME(fuser.get_event_time());
+}
+
+TYPED_TEST(MFUSReshapeLayerTest, TestForwardBottomAxes3) {
+  typedef typename TypeParam::Dtype Dtype;
+  LayerParameter layer_param;
+  BlobShape* shape = layer_param.mutable_reshape_param()->mutable_shape();
+  shape->add_dim(6);
+  shape->add_dim(2);
+  shape->add_dim(3);
+  shape->add_dim(5);
+  vector<int> bottom_shape = {3, 10, 6};
+  this->blob_bottom_vec_[0]->Reshape(bottom_shape);
+  MLUReshapeLayer<Dtype> layer(layer_param);
+  layer.SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
+  ASSERT_TRUE(layer.mfus_supported());
+
+  MFusion<Dtype> fuser;
+  fuser.reset();
+  fuser.addInputs(this->blob_bottom_vec_);
+  fuser.addOutputs(this->blob_top_vec_);
+  layer.Reshape_dispatch(this->blob_bottom_vec_, this->blob_top_vec_);
+  layer.fuse(&fuser);
+  fuser.compile();
+  fuser.forward();
+  for (int i = 0; i < this->blob_bottom_->count(); ++i) {
+    EXPECT_EQ(this->blob_top_->cpu_data()[i],
+              this->blob_bottom_->cpu_data()[i]);
+  }
+  std::ostringstream stream;
+  stream << "bottom1:" << this->blob_bottom_->shape_string().c_str();
+  BOTTOM(stream);
+  EVENT_TIME(fuser.get_event_time());
+}
+
+TYPED_TEST(MFUSReshapeLayerTest, TestForwardBottomAxes5) {
+  typedef typename TypeParam::Dtype Dtype;
+  LayerParameter layer_param;
+  BlobShape* shape = layer_param.mutable_reshape_param()->mutable_shape();
+  shape->add_dim(6);
+  shape->add_dim(2);
+  shape->add_dim(3);
+  shape->add_dim(5);
+  vector<int> bottom_shape = {3, 2, 5, 3, 2};
+  this->blob_bottom_vec_[0]->Reshape(bottom_shape);
+  MLUReshapeLayer<Dtype> layer(layer_param);
+  layer.SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
+  ASSERT_TRUE(layer.mfus_supported());
+
+  MFusion<Dtype> fuser;
+  fuser.reset();
+  fuser.addInputs(this->blob_bottom_vec_);
+  fuser.addOutputs(this->blob_top_vec_);
+  layer.Reshape_dispatch(this->blob_bottom_vec_, this->blob_top_vec_);
+  layer.fuse(&fuser);
+  fuser.compile();
+  fuser.forward();
+  for (int i = 0; i < this->blob_bottom_->count(); ++i) {
+    EXPECT_EQ(this->blob_top_->cpu_data()[i],
+              this->blob_bottom_->cpu_data()[i]);
+  }
+  std::ostringstream stream;
+  stream << "bottom1:" << this->blob_bottom_->shape_string().c_str();
+  BOTTOM(stream);
+  EVENT_TIME(fuser.get_event_time());
+}
+
+TYPED_TEST(MFUSReshapeLayerTest, TestForwardOutputAxes2) {
+  typedef typename TypeParam::Dtype Dtype;
+  LayerParameter layer_param;
+  BlobShape* shape = layer_param.mutable_reshape_param()->mutable_shape();
+  shape->add_dim(3);
+  shape->add_dim(60);
+  MLUReshapeLayer<Dtype> layer(layer_param);
+  layer.SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
+  ASSERT_TRUE(layer.mfus_supported());
+
+  MFusion<Dtype> fuser;
+  fuser.reset();
+  fuser.addInputs(this->blob_bottom_vec_);
+  fuser.addOutputs(this->blob_top_vec_);
+  layer.Reshape_dispatch(this->blob_bottom_vec_, this->blob_top_vec_);
+  layer.fuse(&fuser);
+  fuser.compile();
+  fuser.forward();
+  for (int i = 0; i < this->blob_bottom_->count(); ++i) {
+    EXPECT_EQ(this->blob_top_->cpu_data()[i],
+              this->blob_bottom_->cpu_data()[i]);
+  }
+  std::ostringstream stream;
+  stream << "bottom1:" << this->blob_bottom_->shape_string().c_str();
+  BOTTOM(stream);
+  EVENT_TIME(fuser.get_event_time());
+}
+
+TYPED_TEST(MFUSReshapeLayerTest, TestForwardOutputAxes3) {
+  typedef typename TypeParam::Dtype Dtype;
+  LayerParameter layer_param;
+  BlobShape* shape = layer_param.mutable_reshape_param()->mutable_shape();
+  shape->add_dim(3);
+  shape->add_dim(10);
+  shape->add_dim(6);
+  MLUReshapeLayer<Dtype> layer(layer_param);
+  layer.SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
+  ASSERT_TRUE(layer.mfus_supported());
+
+  MFusion<Dtype> fuser;
+  fuser.reset();
+  fuser.addInputs(this->blob_bottom_vec_);
+  fuser.addOutputs(this->blob_top_vec_);
+  layer.Reshape_dispatch(this->blob_bottom_vec_, this->blob_top_vec_);
+  layer.fuse(&fuser);
+  fuser.compile();
+  fuser.forward();
+  for (int i = 0; i < this->blob_bottom_->count(); ++i) {
+    EXPECT_EQ(this->blob_top_->cpu_data()[i],
+              this->blob_bottom_->cpu_data()[i]);
+  }
+  std::ostringstream stream;
+  stream << "bottom1:" << this->blob_bottom_->shape_string().c_str();
+  BOTTOM(stream);
+  EVENT_TIME(fuser.get_event_time());
+}
+
+TYPED_TEST(MFUSReshapeLayerTest, TestForwardOutputAxes5) {
+  typedef typename TypeParam::Dtype Dtype;
+  LayerParameter layer_param;
+  BlobShape* shape = layer_param.mutable_reshape_param()->mutable_shape();
+  shape->add_dim(3);
+  shape->add_dim(5);
+  shape->add_dim(2);
+  shape->add_dim(2);
+  shape->add_dim(3);
+  MLUReshapeLayer<Dtype> layer(layer_param);
+  layer.SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
+  ASSERT_TRUE(layer.mfus_supported());
+
+  MFusion<Dtype> fuser;
+  fuser.reset();
+  fuser.addInputs(this->blob_bottom_vec_);
+  fuser.addOutputs(this->blob_top_vec_);
   layer.Reshape_dispatch(this->blob_bottom_vec_, this->blob_top_vec_);
   layer.fuse(&fuser);
   fuser.compile();
