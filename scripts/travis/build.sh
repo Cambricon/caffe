@@ -15,11 +15,11 @@
 echo `pwd`
 echo "Prepare swaps before build."
 free -m
-mkdir ./images
-rm -rf ./images/swap
-dd if=/dev/zero of=./images/swap bs=10240 count=1M
-sudo -E mkswap ./images/swap
-sudo -E swapon ./images/swap
+mkdir /opt/images/
+rm -rf /opt/images/swap
+dd if=/dev/zero of=/opt/images/swap bs=10M count=2048
+sudo -E mkswap /opt/images/swap
+sudo -E swapon /opt/images/swap
 echo "After set swap space."
 free -m
 echo "===========build start================"
