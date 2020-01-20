@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -29,17 +29,27 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #ifndef INCLUDE_CAFFE_LAYERS_MLU_BATCH_NORM_LAYER_HPP_
 #define INCLUDE_CAFFE_LAYERS_MLU_BATCH_NORM_LAYER_HPP_
-
+#ifdef USE_MLU
 #include <vector>
-
 #include "caffe/blob.hpp"
 #include "caffe/layer.hpp"
 #include "caffe/layers/batch_norm_layer.hpp"
 #include "caffe/proto/caffe.pb.h"
 
-
 namespace caffe {
-#ifdef USE_MLU
+
+/**
+ * @brief MLU acceleration of BatchNormLayer
+ *        Normalizes the input to have 0-mean and/or unit (1) variance across
+ *        the batch.
+ *
+ * This layer computes Batch Normalization as described in [1]. For each channel
+ * in the data (i.e. axis 1), it subtracts the mean and divides by the variance,
+ * where both statistics are computed across both spatial dimensions and across
+ * the different examples in the batch.
+ *
+ */
+
 template <typename Dtype>
 class MLUBatchNormLayer : public BatchNormLayer<Dtype> {
   public:
@@ -72,6 +82,6 @@ class MLUBatchNormLayer : public BatchNormLayer<Dtype> {
   int bottom_spatial_dim_;
   Blob<Dtype> temp_bn_;
 };
-#endif
 }  // namespace caffe
+#endif  // USE_MLU
 #endif  // INCLUDE_CAFFE_LAYERS_MLU_BATCH_NORM_LAYER_HPP_

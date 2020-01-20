@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -70,6 +70,8 @@ vector<int> getTop5(vector<string> labels, string image, float* data, int count)
 
 void readYUV(string name, cv::Mat img, int h, int w);
 
+cv::Mat readImage(string name, cv::Size size, bool yuvImg);
+
 cv::Mat yuv420sp2Bgr24(cv::Mat yuv_image);
 
 cv::Mat convertYuv2Mat(string img_name, cv::Size inGeometry);
@@ -82,7 +84,16 @@ void printfMluTime(float mluTime);
 
 void printfAccuracy(int imageNum, float acc1, float acc5);
 
-void printPerf(int imageNum, float execTime, float mluTime, int threads = 1);
+void printPerf(int imageNum, float execTime, float mluTime , int threads = 1, int batchsize = 1);
+
+void saveResult(int imageNum, float top1, float top5, float meanAp,
+    float hardwaretime, float endToEndTime, int threads = 1, int batchsize = 1);
+
+string float2string(float value);
+
+vector<int> to_cpu_shape(const vector<int>& mlu_shape);
+
+vector<int> to_mlu_shape(const vector<int>& cpu_shape);
 
 class Timer {
   public:

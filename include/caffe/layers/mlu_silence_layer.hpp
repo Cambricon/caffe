@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -29,6 +29,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #ifndef INCLUDE_CAFFE_LAYERS_MLU_SILENCE_LAYER_HPP_
 #define INCLUDE_CAFFE_LAYERS_MLU_SILENCE_LAYER_HPP_
+#ifdef USE_MLU
 
 #include <vector>
 #include "caffe/blob.hpp"
@@ -37,7 +38,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 namespace caffe {
 
-#ifdef USE_MLU
 /**
  * @brief Ignores bottom blobs while producing no top blobs. (This is useful
  *        to suppress outputs during testing.)
@@ -70,8 +70,6 @@ class MLUSilenceLayer : public SilenceLayer<Dtype> {
   cnmlBaseOp_t silence_op_ptr_;
   vector<Blob<Dtype>*> top_temp_;
 };
-#endif
-
 }  // namespace caffe
-
+#endif  // USE MLU
 #endif  // INCLUDE_CAFFE_LAYERS_MLU_SILENCE_LAYER_HPP_

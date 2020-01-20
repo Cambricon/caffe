@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -30,6 +30,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #ifdef USE_MLU
 #include <vector>
 #include "caffe/layers/mlu_reverse_layer.hpp"
+
 namespace caffe {
 
 template <typename Dtype>
@@ -42,7 +43,7 @@ template <typename Dtype>
 void MLUReverseLayer<Dtype>::Reshape_tensor(const vector<Blob<Dtype>*>& bottom,
                                             const vector<Blob<Dtype>*>& top ) {
   BaseDataType cpu_dtype = sizeof(Dtype) == 4 ? DT_FLOAT32 : DT_DOUBLE;
-  BaseDataType mlu_dtype = DT_FLOAT16;
+  BaseDataType mlu_dtype = bottom[0]->mlu_type();
   top[0]->Reshape(bottom[0]->shape(), cpu_dtype, mlu_dtype, CNML_TENSOR);
 }
 
@@ -66,27 +67,28 @@ void MLUReverseLayer<Dtype>::MLUDestroyOp() {
 
 template<typename Dtype>
 void MLUReverseLayer<Dtype>::MLUCreateOpBindData(const vector<Blob<Dtype>*>& bottom,
-                                            const vector<Blob<Dtype>*>& top) {
+                                                 const vector<Blob<Dtype>*>& top) {
   MLU_CHECK(cnmlCreateReverseOp(&reverse_op_ptr_, bottom[0]->mlu_tensor(),
-                                top[0]->mlu_tensor(), CNML_REVERSE_AXIS_C));
+                                top[0]->mlu_tensor(), CNML_DIM_C));
 }
 
 template<typename Dtype>
 void MLUReverseLayer<Dtype>::MLUCompileOp() {
   MLU_CHECK(cnmlCompileBaseOp(reverse_op_ptr_, Caffe::rt_core(),
-                              Caffe::model_parallel()));
+                              Caffe::core_number()));
 }
 
 template <typename Dtype>
 void MLUReverseLayer<Dtype>::Forward_mlu(const vector<Blob<Dtype>*>& bottom,
                                          const vector<Blob<Dtype>*>& top) {
   MLU_CHECK(cnmlComputeReverseOpForward_V3(reverse_op_ptr_,
-                                       bottom[0]->mutable_mlu_data(),
-                                       top[0]->mutable_mlu_data(),
-                                       Caffe::forward_param(),
-                                       Caffe::queue()));
+                                           bottom[0]->mutable_mlu_data(),
+                                           top[0]->mutable_mlu_data(),
+                                           Caffe::forward_param(),
+                                           Caffe::queue()));
 }
 
 INSTANTIATE_CLASS(MLUReverseLayer);
+
 }  // namespace caffe
-#endif
+#endif  // USE_MLU

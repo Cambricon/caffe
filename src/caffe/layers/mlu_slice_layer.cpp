@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -32,7 +32,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <algorithm>
 #include <fstream>  // NOLINT(readability/streams)
 #include <vector>
-
 #include "caffe/layers/mlu_slice_layer.hpp"
 #include "caffe/util/math_functions.hpp"
 
@@ -40,7 +39,7 @@ namespace caffe {
 
 template <typename Dtype>
 void MLUSliceLayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& bottom,
-    const vector<Blob<Dtype>*>& top) {
+                                      const vector<Blob<Dtype>*>& top) {
   SliceLayer<Dtype>::LayerSetUp(bottom, top);
 }
 
@@ -54,35 +53,38 @@ void MLUSliceLayer<Dtype>::Forward_mlu(const vector<Blob<Dtype>*>& bottom,
                                        const vector<Blob<Dtype>*>& top) {
   if (top.size() == 1) {
     MLU_CHECK(cnmlComputeDeviceMemcpyOpForward_V3(slice_op_ptr_,
-                                              bottom[0]->mutable_mlu_data(),
-                                              top[0]->mutable_mlu_data(),
-                                              Caffe::forward_param(),
-                                              Caffe::queue()));
+                                                  bottom[0]->mutable_mlu_data(),
+                                                  top[0]->mutable_mlu_data(),
+                                                  Caffe::forward_param(),
+                                                  Caffe::queue()));
     return;
   }
 
   void* mlutensor_input_ptrs[bottom.size()];
   void* mlutensor_output_ptrs[top.size()];
-  for (int i = 0; i < bottom.size(); i++)
+  cnmlTensor_t mlu_tensor_input[bottom.size()];
+  cnmlTensor_t mlu_tensor_output[top.size()];
+  for (int i = 0; i < bottom.size(); i++) {
     mlutensor_input_ptrs[i] = bottom[i]->mutable_mlu_data();
-  for (int i = 0; i < top.size(); i++)
+    mlu_tensor_input[i] = bottom[i]->mlu_tensor();
+  }
+  for (int i = 0; i < top.size(); i++) {
     mlutensor_output_ptrs[i] =  top[i]->mutable_mlu_data();
-  MLU_CHECK(cnmlComputeSplitOpForward_V3(slice_op_ptr_,
-                                     mlutensor_input_ptrs,
-                                     bottom.size(),
-                                     mlutensor_output_ptrs,
-                                     top.size(),
-                                     Caffe::forward_param(),
-                                     Caffe::queue()));
+    mlu_tensor_output[i] = top[i]->mlu_tensor();
+  }
+  MLU_CHECK(cnmlComputeNdSplitOpForward_V2(slice_op_ptr_,
+                                           mlu_tensor_input,
+                                           mlutensor_input_ptrs,
+                                           bottom.size(),
+                                           mlu_tensor_output,
+                                           mlutensor_output_ptrs,
+                                           top.size(),
+                                           Caffe::queue(),
+                                           nullptr));
 }
 
 template <typename Dtype>
 void MLUSliceLayer<Dtype>::MLUDestroyOp() {
-  if (slice_param_ptr_ != nullptr) {
-    MLU_CHECK(cnmlDestroySplitOpParam(&slice_param_ptr_));
-    slice_param_ptr_ = nullptr;
-  }
-
   if (slice_op_ptr_ != nullptr) {
     MLU_CHECK(cnmlDestroyBaseOp(&slice_op_ptr_));
     slice_op_ptr_ = nullptr;
@@ -99,17 +101,6 @@ void MLUSliceLayer<Dtype>::MLUCreateOpBindData(
                                       top[0]->mlu_tensor()));
     return;
   }
-
-  cnmlSplitMode_t sliceModes[4] {cnmlSplitMode_t::CNML_SPLIT_BATCH,
-                                cnmlSplitMode_t::CNML_SPLIT_FEAT,
-                                cnmlSplitMode_t::CNML_SPLIT_HIGHT,
-                                cnmlSplitMode_t::CNML_SPLIT_WIDTH};
-
-  MLU_CHECK(cnmlCreateSplitOpParam(&slice_param_ptr_,
-                                bottom.size(),
-                                top.size(),
-                                sliceModes[this->slice_axis_]));
-
   int kBottomSize = bottom.size();
   cnmlTensor_t mlutensor_inputs[kBottomSize];
   for (int i = 0; i < bottom.size(); i++)
@@ -119,13 +110,21 @@ void MLUSliceLayer<Dtype>::MLUCreateOpBindData(
   cnmlTensor_t mlutensor_outputs[kTopSize];
   for (int i = 0; i < top.size(); i++)
     mlutensor_outputs[i] = top[i]->mlu_tensor();
+  int length = bottom[0]->shape().size();
+  vector<int> dim_order(length, 1);  // = {0, 3, 2, 1};
+  dim_order[0] = 0;
+  dim_order[1] = length - 1;
+  for (int i = 2; i < length; i++) {
+      dim_order[i] = i-1;
+  }
+  int slice_axis = dim_order[this->slice_axis_];
 
-  MLU_CHECK(cnmlCreateSplitOp(&slice_op_ptr_,
-                             slice_param_ptr_,
-                             mlutensor_inputs,
-                             bottom.size(),
-                             mlutensor_outputs,
-                             top.size()));
+  MLU_CHECK(cnmlCreateNdSplitOp(&slice_op_ptr_,
+                                 slice_axis,
+                                 mlutensor_inputs,
+                                 bottom.size(),
+                                 mlutensor_outputs,
+                                 top.size()));
 }
 
 template <typename Dtype>
@@ -133,8 +132,8 @@ void MLUSliceLayer<Dtype>::Reshape_tensor(const vector<Blob<Dtype>*>& bottom,
                                           const vector<Blob<Dtype>*>& top) {
   SliceLayer<Dtype>::Reshape(bottom, top);
   BaseDataType cpu_dtype = sizeof(Dtype) == 4 ? DT_FLOAT32 : DT_DOUBLE;
-  BaseDataType mlu_dtype = DT_FLOAT16;
   for (int i = 0; i < top.size(); ++i) {
+    BaseDataType mlu_dtype = bottom[0]->mlu_type();
     top[i]->Reshape(top[i]->shape(), cpu_dtype, mlu_dtype, CNML_TENSOR);
   }
 }
@@ -142,4 +141,4 @@ void MLUSliceLayer<Dtype>::Reshape_tensor(const vector<Blob<Dtype>*>& bottom,
 INSTANTIATE_CLASS(MLUSliceLayer);
 
 }  // namespace caffe
-#endif
+#endif  // USE_MLU

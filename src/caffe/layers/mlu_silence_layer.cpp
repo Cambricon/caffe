@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -34,13 +34,11 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 namespace caffe {
 
 template <typename Dtype>
-void MLUSilenceLayer<Dtype>::Reshape_tensor(
-    const vector<Blob<Dtype>*>& bottom,
-    const vector<Blob<Dtype>*>& top) {
-
+void MLUSilenceLayer<Dtype>::Reshape_tensor(const vector<Blob<Dtype>*>& bottom,
+                                            const vector<Blob<Dtype>*>& top) {
   if (Caffe::mode() == Caffe::MFUS) {
     BaseDataType cpu_dtype = sizeof(Dtype) == 4 ? DT_FLOAT32 : DT_DOUBLE;
-    BaseDataType mlu_dtype = DT_FLOAT16;
+    BaseDataType mlu_dtype = bottom[0]->mlu_type();
     top_temp_.clear();
     top_temp_.push_back(new Blob<Dtype>(bottom[0]->shape(),
                                         cpu_dtype,
@@ -48,7 +46,6 @@ void MLUSilenceLayer<Dtype>::Reshape_tensor(
                                         CNML_TENSOR));
   }
 }
-
 
 template <typename Dtype>
 void MLUSilenceLayer<Dtype>::fuse(MFusion<Dtype>* fuser) {
@@ -77,13 +74,14 @@ void MLUSilenceLayer<Dtype>::MLUCreateOpBindData(
 
   if (Caffe::mode() == Caffe::MFUS) {
     MLU_CHECK(cnmlCreateActiveOp(
-        &silence_op_ptr_,
-        cnmlActiveFunction_t::CNML_ACTIVE_NONE,
-        bottom[0]->mlu_tensor(),
-        top_temp_[0]->mlu_tensor()));
+              &silence_op_ptr_,
+              cnmlActiveFunction_t::CNML_ACTIVE_NONE,
+              bottom[0]->mlu_tensor(),
+              top_temp_[0]->mlu_tensor()));
   }
 }
 
 INSTANTIATE_CLASS(MLUSilenceLayer);
+
 }  // namespace caffe
-#endif
+#endif  // USE_MLU

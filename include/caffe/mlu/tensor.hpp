@@ -2,7 +2,7 @@
 All modification made by Cambricon Corporation: © 2018--2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -40,20 +40,24 @@ namespace caffe {
 class MLUTensorDesc {
   public:
   MLUTensorDesc()
-      : cpu_tensor_(nullptr),
-        mlu_tensor_(nullptr),
+      : mlu_tensor_(nullptr),
         tensor_type_(CNML_TENSOR),
-        cpu_dtype_(DT_INVALID),
-        mlu_dtype_(DT_INVALID),
+        cpu_dtype_(DT_FLOAT32),
+        mlu_dtype_(DT_FLOAT16),
         position_(0),
         has_position_(false),
         scale_(1),
         has_scale_(false),
-        cpu_tensor_order_(CNML_NCHW) {}
+        data_num_(0),
+        dim_(4),
+        has_dim_strides_(false),
+        is_first_conv_input_tensor_(false),
+        preprocess_(true) {}
 
   void remember(const vector<int>& shape, cnmlTensorType_t tensor_type,
                 BaseDataType cpu_dtype, BaseDataType mlu_dtype,
-                cnmlDataOrder_t shape_order);
+                cnmlDataOrder_t shape_order,
+                vector<int>* dim_strides = nullptr);
   void set_position(int position);
   void set_scale(float scale);
   void set_positions(const vector<int>& position);
@@ -68,16 +72,22 @@ class MLUTensorDesc {
   const BaseDataType cpu_type() const { return cpu_dtype_; }
   void set_mlu_type(BaseDataType mlu_dtype) { mlu_dtype_ = mlu_dtype; }
   const BaseDataType mlu_type() const { return mlu_dtype_; }
-  cnmlTensorType_t type() { return tensor_type_; }
-  void cpuCreate();
-  void mluCreate();
-  const cnmlCpuTensor_t cpu() const;
+  cnmlTensorType_t type() const { return tensor_type_; }
+  const size_t data_num() const { return data_num_; }
+  void Create();
   const cnmlTensor_t mlu() const;
-  void setCpuTensorOrder(cnmlDataOrder_t order) { cpu_tensor_order_ = order; }
+  vector<int> cpu_shape() const;
+  vector<int> mlu_shape() const { return shape_; }
+  const int shape_dim() const { return dim_; }
+  vector<int> dim_strides() const { return dim_strides_; }
+  bool has_dim_strides() const { return has_dim_strides_; }
+  void set_dim_strides(vector<int> dim_strides);
+  bool is_first_conv_input_tensor() const { return is_first_conv_input_tensor_; }
+  void set_preprocess(bool preprocess) { preprocess_ = preprocess; }
+  bool is_preprocess() const {return preprocess_; }
   ~MLUTensorDesc();
 
   private:
-  cnmlCpuTensor_t cpu_tensor_;
   cnmlTensor_t mlu_tensor_;
 
   vector<int> shape_;
@@ -89,12 +99,15 @@ class MLUTensorDesc {
   bool has_position_;
   float scale_;
   bool has_scale_;
-  void cpuDestroy();
-  void mluDestroy();
-  vector<int> shapeWithoutParallel();
+  void Destroy();
   vector<int> positions_;
   vector<float> scales_;
-  cnmlDataOrder_t cpu_tensor_order_;
+  size_t data_num_;
+  int dim_;
+  vector<int> dim_strides_;
+  bool has_dim_strides_;
+  bool is_first_conv_input_tensor_;
+  bool preprocess_;
 
   DISABLE_COPY_AND_ASSIGN(MLUTensorDesc);
   DISABLE_NEW_AND_DELETE();

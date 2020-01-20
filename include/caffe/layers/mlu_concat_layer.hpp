@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -30,18 +30,16 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #ifndef INCLUDE_CAFFE_LAYERS_MLU_CONCAT_LAYER_HPP_
 #define INCLUDE_CAFFE_LAYERS_MLU_CONCAT_LAYER_HPP_
 #ifdef USE_MLU
-
 #include <vector>
-
 #include "caffe/blob.hpp"
 #include "caffe/layer.hpp"
 #include "caffe/proto/caffe.pb.h"
-
 #include "caffe/layers/concat_layer.hpp"
 
 /**
- * @breif Takes at least two Blobs and concatenates them along the specific
- * axis, outputting the result.
+ * @brief MLU acceleration of ConcatLayer
+ *        ConcatLayer Takes at least two Blobs and concatenates them along the specific
+ *        axis, outputting the result.
  *
  * if there is only one bottom blob, data in it will be directly copied
  * into top's blob.
@@ -54,8 +52,7 @@ template <typename Dtype>
 class MLUConcatLayer : public ConcatLayer<Dtype> {
   public:
   explicit MLUConcatLayer(const LayerParameter& param)
-      : ConcatLayer<Dtype>(param),
-        concat_param_ptr_(nullptr), concat_op_ptr_(nullptr) {}
+      : ConcatLayer<Dtype>(param), concat_op_ptr_(nullptr) {}
 
   virtual void LayerSetUp(const vector<Blob<Dtype>*>& bottom,
                           const vector<Blob<Dtype>*>& top);
@@ -72,7 +69,7 @@ class MLUConcatLayer : public ConcatLayer<Dtype> {
   virtual void MLUCompileOp() {
       MLU_CHECK(cnmlCompileBaseOp(concat_op_ptr_,
                                   Caffe::rt_core(),
-                                  Caffe::model_parallel()));
+                                  Caffe::core_number()));
   }
 
   /**
@@ -95,10 +92,8 @@ class MLUConcatLayer : public ConcatLayer<Dtype> {
   virtual void Forward_mlu(const vector<Blob<Dtype>*>& bottom,
                            const vector<Blob<Dtype>*>& top);
 
-  cnmlConcatOpParam_t concat_param_ptr_;
   cnmlBaseOp_t concat_op_ptr_;
 };
-#endif
-
 }  // namespace caffe
+#endif  // USE_MLU
 #endif  // INCLUDE_CAFFE_LAYERS_MLU_CONCAT_LAYER_HPP_

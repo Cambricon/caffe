@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -48,6 +48,8 @@ using std::stringstream;
 
 DEFINE_int32(dump, 1, "0 or 1, dump output images or not.");
 DEFINE_string(outputdir, ".", "The directoy used to save output images");
+DEFINE_double(confidencethreshold, 0.005,  "Only keep detections with score equal "
+                                          "to or higher than the threshold.");
 
 typedef OffDataProvider<void*, Queue> OffDataProviderT;
 typedef OffRunner<void*, Queue> OffRunnerT;
@@ -120,7 +122,9 @@ int main(int argc, char* argv[]) {
   timer.log("Total execution time");
   float execTime = timer.getDuration();
   float mluTime = pipeline->runner()->runTime();
-  printPerf(imageNum, execTime, mluTime);
+  int batchsize = pipeline->runner()->n();
+  printPerf(imageNum, execTime, mluTime, 1, batchsize);
+  saveResult(imageNum, (-1), (-1), (-1), mluTime, execTime, 1, batchsize);
 
   delete pipeline;
   cnrtDestroy();

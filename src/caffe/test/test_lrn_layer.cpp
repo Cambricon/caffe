@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -448,14 +448,15 @@ class MLULRNLayerTest : public MLUDeviceTest<TypeParam> {
 
   protected:
   MLULRNLayerTest()
-      : epsilon_(Dtype(5e-3)),
+      : epsilon_(Dtype(0.1)),
         blob_bottom_(new Blob<Dtype>()),
         blob_top_(new Blob<Dtype>()) {
     Caffe::set_random_seed(1701);
     blob_bottom_->Reshape(2, 7, 3, 3);
     // fill the values
     FillerParameter filler_param;
-    GaussianFiller<Dtype> filler(filler_param);
+    filler_param.set_value(0.1);
+    ConstantFiller<Dtype> filler(filler_param);
     filler.Fill(this->blob_bottom_);
     blob_bottom_vec_.push_back(blob_bottom_);
     blob_top_vec_.push_back(blob_top_);
@@ -485,10 +486,14 @@ TYPED_TEST(MLULRNLayerTest, TestSetupAcrossChannels) {
   EXPECT_EQ(this->blob_top_->width(), 3);
 }
 
-TYPED_TEST(MLULRNLayerTest, TestForwardAcrossChannels) {
+
+TYPED_TEST(MLULRNLayerTest, TestForwardAcrossChannelsInt8) {
   typedef typename TypeParam::Dtype Dtype;
   LayerParameter layer_param;
-
+  BlobDataType blob_dtype;  // set position
+  blob_dtype = get_quantized_info(*this->blob_bottom_,
+                                layer_param, "common", DT_INT8);
+  layer_param.add_bottom_mlu_dtype()->CopyFrom(blob_dtype);
   MLULRNLayer<Dtype> layer(layer_param);
   layer.SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
   layer.Reshape_dispatch(this->blob_bottom_vec_, this->blob_top_vec_);
@@ -498,7 +503,7 @@ TYPED_TEST(MLULRNLayerTest, TestForwardAcrossChannels) {
   float err_sum = 0, sum = 0;
   for (int i = 0; i < this->blob_bottom_->count(); ++i) {
     EXPECT_NEAR(this->blob_top_->cpu_data()[i], top_reference.cpu_data()[i],
-                3e-3);
+                5e-3);
     err_sum += std::abs(this->blob_top_->cpu_data()[i] - top_reference.cpu_data()[i]);
     sum += std::abs(top_reference.cpu_data()[i]);
   }
@@ -508,13 +513,23 @@ TYPED_TEST(MLULRNLayerTest, TestForwardAcrossChannels) {
   ERR_RATE(err_sum/sum);
   EVENT_TIME(layer.get_event_time());
 }
-
-TYPED_TEST(MLULRNLayerTest, TestForwardAcrossChannelsParam) {
+TYPED_TEST(MLULRNLayerTest, TestForwardAcrossChannelsParamIn8) {
   typedef typename TypeParam::Dtype Dtype;
   LayerParameter layer_param;
   LRNParameter* lrn_param = layer_param.mutable_lrn_param();
   lrn_param->set_alpha(0.001);
   lrn_param->set_beta(0.75);
+  BlobDataType blob_dtype;  // set position
+  blob_dtype = get_quantized_info(*this->blob_bottom_,
+                                layer_param, "common", DT_INT8);
+  layer_param.add_bottom_mlu_dtype()->CopyFrom(blob_dtype);
+  int position = -3;  // set weight position
+  int scale = 1.5875;
+  BlobDataType blobs_dtype;
+  blobs_dtype.set_type(DT_INT8);
+  blobs_dtype.add_position(position);
+  blobs_dtype.add_scale(scale);
+  layer_param.add_blobs_dtype()->CopyFrom(blobs_dtype);
   MLULRNLayer<Dtype> layer(layer_param);
   layer.SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
   layer.Reshape_dispatch(this->blob_bottom_vec_, this->blob_top_vec_);
@@ -538,10 +553,21 @@ TYPED_TEST(MLULRNLayerTest, TestForwardAcrossChannelsParam) {
   EVENT_TIME(layer.get_event_time());
 }
 
-TYPED_TEST(MLULRNLayerTest, TestForwardAcrossChannelsLargeRegion) {
+TYPED_TEST(MLULRNLayerTest, TestForwardAcrossChannelsLargeRegionInt8) {
   typedef typename TypeParam::Dtype Dtype;
   LayerParameter layer_param;
   layer_param.mutable_lrn_param()->set_local_size(15);
+  BlobDataType blob_dtype;  // set position
+  blob_dtype = get_quantized_info(*this->blob_bottom_,
+                                layer_param, "common", DT_INT8);
+  layer_param.add_bottom_mlu_dtype()->CopyFrom(blob_dtype);
+  int position = -3;  // set weight position
+  int scale = 1.5875;
+  BlobDataType blobs_dtype;
+  blobs_dtype.set_type(DT_INT8);
+  blobs_dtype.add_position(position);
+  blobs_dtype.add_scale(scale);
+  layer_param.add_blobs_dtype()->CopyFrom(blobs_dtype);
   MLULRNLayer<Dtype> layer(layer_param);
   layer.SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
   layer.Reshape_dispatch(this->blob_bottom_vec_, this->blob_top_vec_);
@@ -551,12 +577,12 @@ TYPED_TEST(MLULRNLayerTest, TestForwardAcrossChannelsLargeRegion) {
   Dtype err_sum = 0, sum = 0;
   for (int i = 0; i < this->blob_bottom_->count(); ++i) {
     EXPECT_NEAR(this->blob_top_->cpu_data()[i], top_reference.cpu_data()[i],
-                0.1);
+                1);
     err_sum +=
         std::abs(this->blob_top_->cpu_data()[i] - top_reference.cpu_data()[i]);
     sum += std::abs(top_reference.cpu_data()[i]);
   }
-  EXPECT_LE(err_sum / sum, 5e-2);
+  EXPECT_LE(err_sum / sum, 1);
   std::ostringstream stream, param;
   param << "local_size:" << layer_param.mutable_lrn_param()->local_size();
   stream << "bottom1:" << this->blob_bottom_->shape_string().c_str();
@@ -580,7 +606,7 @@ TYPED_TEST(MLULRNLayerTest, TestSetupWithinChannel) {
   EXPECT_EQ(this->blob_top_->width(), 3);
 }
 
-TYPED_TEST(MLULRNLayerTest, TestForwardWithinChannelParam) {
+TYPED_TEST(MLULRNLayerTest, TestForwardWithinChannelParamInt8) {
   typedef typename TypeParam::Dtype Dtype;
   LayerParameter layer_param;
   layer_param.mutable_lrn_param()->set_norm_region(
@@ -588,6 +614,17 @@ TYPED_TEST(MLULRNLayerTest, TestForwardWithinChannelParam) {
   layer_param.mutable_lrn_param()->set_alpha(0.001);
   layer_param.mutable_lrn_param()->set_beta(0.75);
   layer_param.mutable_lrn_param()->set_local_size(3);
+  BlobDataType blob_dtype;  // set position
+  blob_dtype = get_quantized_info(*this->blob_bottom_,
+                                layer_param, "common", DT_INT8);
+  layer_param.add_bottom_mlu_dtype()->CopyFrom(blob_dtype);
+  int position = -3;  // set weight position
+  int scale = 1.5875;
+  BlobDataType blobs_dtype;
+  blobs_dtype.set_type(DT_INT8);
+  blobs_dtype.add_position(position);
+  blobs_dtype.add_scale(scale);
+  layer_param.add_blobs_dtype()->CopyFrom(blobs_dtype);
   MLULRNLayer<Dtype> layer(layer_param);
   layer.SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
   layer.Reshape_dispatch(this->blob_bottom_vec_, this->blob_top_vec_);
@@ -648,14 +685,15 @@ class MFUSLRNLayerTest : public MFUSDeviceTest<TypeParam> {
 
   protected:
   MFUSLRNLayerTest()
-      : epsilon_(Dtype(5e-3)),
+      : epsilon_(Dtype(6e-3)),
         blob_bottom_(new Blob<Dtype>()),
         blob_top_(new Blob<Dtype>()) {
     Caffe::set_random_seed(1701);
     blob_bottom_->Reshape(2, 7, 3, 3);
     // fill the values
     FillerParameter filler_param;
-    GaussianFiller<Dtype> filler(filler_param);
+    filler_param.set_value(0.1);
+    ConstantFiller<Dtype> filler(filler_param);
     filler.Fill(this->blob_bottom_);
     blob_bottom_vec_.push_back(blob_bottom_);
     blob_top_vec_.push_back(blob_top_);
@@ -674,14 +712,23 @@ class MFUSLRNLayerTest : public MFUSDeviceTest<TypeParam> {
 
 TYPED_TEST_CASE(MFUSLRNLayerTest, TestMFUSDevices);
 
-TYPED_TEST(MFUSLRNLayerTest, TestForwardAcrossChannels) {
+TYPED_TEST(MFUSLRNLayerTest, TestForwardAcrossChannelsInt8) {
   typedef typename TypeParam::Dtype Dtype;
   LayerParameter layer_param;
-
+  BlobDataType blob_dtype;  // set position
+  blob_dtype = get_quantized_info(*this->blob_bottom_,
+                                layer_param, "common", DT_INT8);
+  layer_param.add_bottom_mlu_dtype()->CopyFrom(blob_dtype);
+  int position = -3;  // set weight position
+  int scale = 1.5875;
+  BlobDataType blobs_dtype;
+  blobs_dtype.set_type(DT_INT8);
+  blobs_dtype.add_position(position);
+  blobs_dtype.add_scale(scale);
+  layer_param.add_blobs_dtype()->CopyFrom(blobs_dtype);
   MLULRNLayer<Dtype> layer(layer_param);
   layer.SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
   ASSERT_TRUE(layer.mfus_supported());
-
   MFusion<Dtype> fuser;
   fuser.reset();
   fuser.addInputs(this->blob_bottom_vec_);
@@ -690,13 +737,12 @@ TYPED_TEST(MFUSLRNLayerTest, TestForwardAcrossChannels) {
   layer.fuse(&fuser);
   fuser.compile();
   fuser.forward();
-
   Blob<Dtype> top_reference;
   referenceLRNForward(*(this->blob_bottom_), layer_param, &top_reference);
   float err_sum = 0, sum = 0;
   for (int i = 0; i < this->blob_bottom_->count(); ++i) {
     EXPECT_NEAR(this->blob_top_->cpu_data()[i], top_reference.cpu_data()[i],
-                3e-3);
+                5e-3);
     err_sum += std::abs(this->blob_top_->cpu_data()[i] -
                 top_reference.cpu_data()[i]);
     sum += top_reference.cpu_data()[i];
@@ -708,16 +754,26 @@ TYPED_TEST(MFUSLRNLayerTest, TestForwardAcrossChannels) {
   EVENT_TIME(layer.get_event_time());
 }
 
-TYPED_TEST(MFUSLRNLayerTest, TestForwardAcrossChannelsParam) {
+TYPED_TEST(MFUSLRNLayerTest, TestForwardAcrossChannelsParamInt8) {
   typedef typename TypeParam::Dtype Dtype;
   LayerParameter layer_param;
   LRNParameter* lrn_param = layer_param.mutable_lrn_param();
   lrn_param->set_alpha(0.001);
   lrn_param->set_beta(0.75);
+  BlobDataType blob_dtype;  // set position
+  blob_dtype = get_quantized_info(*this->blob_bottom_,
+                                layer_param, "common", DT_INT8);
+  layer_param.add_bottom_mlu_dtype()->CopyFrom(blob_dtype);
+  int position = -3;  // set weight position
+  int scale = 1.5875;
+  BlobDataType blobs_dtype;
+  blobs_dtype.set_type(DT_INT8);
+  blobs_dtype.add_position(position);
+  blobs_dtype.add_scale(scale);
+  layer_param.add_blobs_dtype()->CopyFrom(blobs_dtype);
   MLULRNLayer<Dtype> layer(layer_param);
   layer.SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
   ASSERT_TRUE(layer.mfus_supported());
-
   MFusion<Dtype> fuser;
   fuser.reset();
   fuser.addInputs(this->blob_bottom_vec_);
@@ -726,7 +782,6 @@ TYPED_TEST(MFUSLRNLayerTest, TestForwardAcrossChannelsParam) {
   layer.fuse(&fuser);
   fuser.compile();
   fuser.forward();
-
   Blob<Dtype> top_reference;
   referenceLRNForward(*(this->blob_bottom_), layer_param, &top_reference);
   float err_sum = 0, sum = 0;
@@ -746,14 +801,24 @@ TYPED_TEST(MFUSLRNLayerTest, TestForwardAcrossChannelsParam) {
   EVENT_TIME(layer.get_event_time());
 }
 
-TYPED_TEST(MFUSLRNLayerTest, TestForwardAcrossChannelsLargeRegion) {
+TYPED_TEST(MFUSLRNLayerTest, TestForwardAcrossChannelsLargeRegionInt8) {
   typedef typename TypeParam::Dtype Dtype;
   LayerParameter layer_param;
   layer_param.mutable_lrn_param()->set_local_size(15);
+  BlobDataType blob_dtype;  // set position
+  blob_dtype = get_quantized_info(*this->blob_bottom_,
+                                layer_param, "common", DT_INT8);
+  layer_param.add_bottom_mlu_dtype()->CopyFrom(blob_dtype);
+  int position = -3;  // set weight position
+  int scale = 1.5875;
+  BlobDataType blobs_dtype;
+  blobs_dtype.set_type(DT_INT8);
+  blobs_dtype.add_position(position);
+  blobs_dtype.add_scale(scale);
+  layer_param.add_blobs_dtype()->CopyFrom(blobs_dtype);
   MLULRNLayer<Dtype> layer(layer_param);
   layer.SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
   ASSERT_TRUE(layer.mfus_supported());
-
   MFusion<Dtype> fuser;
   fuser.reset();
   fuser.addInputs(this->blob_bottom_vec_);
@@ -762,18 +827,17 @@ TYPED_TEST(MFUSLRNLayerTest, TestForwardAcrossChannelsLargeRegion) {
   layer.fuse(&fuser);
   fuser.compile();
   fuser.forward();
-
   Blob<Dtype> top_reference;
   referenceLRNForward(*(this->blob_bottom_), layer_param, &top_reference);
   Dtype err_sum = 0, sum = 0;
   for (int i = 0; i < this->blob_bottom_->count(); ++i) {
     EXPECT_NEAR(this->blob_top_->cpu_data()[i], top_reference.cpu_data()[i],
-                0.1);
+                5e-3);
     err_sum +=
         std::abs(this->blob_top_->cpu_data()[i] - top_reference.cpu_data()[i]);
     sum += std::abs(top_reference.cpu_data()[i]);
   }
-  EXPECT_LE(err_sum / sum, 5e-2);
+  EXPECT_LE(err_sum / sum, 2e-1);
   std::ostringstream stream, param;
   param << "local_size:" << layer_param.mutable_lrn_param()->local_size();
   stream << "bottom1:" << this->blob_bottom_->shape_string().c_str();
@@ -794,7 +858,6 @@ TYPED_TEST(MFUSLRNLayerTest, TestForwardWithinChannelParam) {
   MLULRNLayer<Dtype> layer(layer_param);
   layer.SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
   ASSERT_TRUE(layer.mfus_supported());
-
   MFusion<Dtype> fuser;
   fuser.reset();
   fuser.addInputs(this->blob_bottom_vec_);

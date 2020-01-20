@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -31,21 +31,31 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <iostream>
 #include <vector>
 #include "caffe/layers/mlu_yuvtorgb_layer.hpp"
+
 namespace caffe {
+
 template <typename Dtype>
 void MLUYUVtoRGBLayer<Dtype>::Reshape_tensor(const vector<Blob<Dtype>*>& bottom,
                                              const vector<Blob<Dtype>*>& top) {
-  CHECK((bottom[0]->shape(1) == 1)
-         && (bottom[0]->shape(2) % 3 == 0)
-         && (bottom[0]->shape(3) % 2 == 0))
-    << "YUV shape wrong";
-  vector<int> out_shape(4, 1);
-  out_shape[0] = bottom[0]->shape(0);
+  if (!((bottom[0]->shape(1) == 1) &&
+      (bottom[1]->shape(1) == 1) &&
+      (bottom[0]->shape(2) / bottom[1]->shape(2) == 2) &&
+      (bottom[0]->shape(3) == bottom[1]->shape(3) &&
+      (bottom[0]->shape(0) == bottom[1]->shape(0))))) {
+     LOG(FATAL) << "YUV shape wrong.";
+  }
+  bottom[0]->set_preprocess(false);
+  bottom[1]->set_preprocess(false);
+  top[0]->set_preprocess(false);
+
+  vector<int> out_shape(bottom[0]->shape());
   out_shape[1] = 4;
-  out_shape[2] = bottom[0]->shape(2) * 2 / 3;
-  out_shape[3] = bottom[0]->shape(3);
   BaseDataType cpu_dtype = DT_UINT8;
   BaseDataType mlu_dtype = DT_UINT8;
+  bottom[0]->set_cpu_type(cpu_dtype);
+  bottom[0]->set_mlu_type(mlu_dtype);
+  bottom[1]->set_cpu_type(cpu_dtype);
+  bottom[1]->set_mlu_type(mlu_dtype);
   top[0]->Reshape(out_shape, cpu_dtype, mlu_dtype, CNML_TENSOR);
 }
 
@@ -66,7 +76,7 @@ template <typename Dtype>
 void MLUYUVtoRGBLayer<Dtype>::MLUCompileOp() {
   MLU_CHECK(cnmlCompileBaseOp(yuv2rgb_op_ptr_,
                               Caffe::rt_core(),
-                              Caffe::model_parallel()));
+                              Caffe::core_number()));
 }
 
 template <typename Dtype>
@@ -85,10 +95,9 @@ void MLUYUVtoRGBLayer<Dtype>::MLUCreateOpBindData(
   } else {
     rgb_type = CNML_ARGB;
   }
-  bottom[0]->set_cpu_type(DT_UINT8);
-  bottom[0]->set_mlu_type(DT_UINT8);
-  MLU_CHECK(cnmlCreateYUVtoRGBOp(&yuv2rgb_op_ptr_,
+  MLU_CHECK(cnmlCreateYUVtoRGBProOp(&yuv2rgb_op_ptr_,
                                  bottom[0]->mlu_tensor(),
+                                 bottom[1]->mlu_tensor(),
                                  top[0]->mlu_tensor(),
                                  yuv_type, rgb_type));
 }
@@ -96,11 +105,15 @@ void MLUYUVtoRGBLayer<Dtype>::MLUCreateOpBindData(
 template <typename Dtype>
 void MLUYUVtoRGBLayer<Dtype>::Forward_mlu(const vector<Blob<Dtype>*>& bottom,
                                           const vector<Blob<Dtype>*>& top) {
-  MLU_CHECK(cnmlComputeYUVtoRGBOpForward_V3(yuv2rgb_op_ptr_,
-                                            (void*)bottom[0]->mlu_data(), //  NOLINT
+  MLU_CHECK(cnmlComputeYUVtoRGBProOpForward_V4(yuv2rgb_op_ptr_,
+                                            NULL,
+                                            bottom[0]->mutable_mlu_data(),
+                                            NULL,
+                                            bottom[1]->mutable_mlu_data(),
+                                            NULL,
                                             top[0]->mutable_mlu_data(),
-                                            Caffe::forward_param(),
-                                            Caffe::queue()));
+                                            Caffe::queue(),
+                                            NULL));
 }
 
 INSTANTIATE_CLASS(MLUYUVtoRGBLayer);

@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -37,22 +37,20 @@ namespace caffe {
 
 template <typename Dtype>
 void MLUDropoutLayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& bottom,
-                                      const vector<Blob<Dtype>*>& top) {
+                                        const vector<Blob<Dtype>*>& top) {
   DropoutLayer<Dtype>::LayerSetUp(bottom, top);
 }
 
 template <typename Dtype>
 void MLUDropoutLayer<Dtype>::Reshape_tensor(const vector<Blob<Dtype>*>& bottom,
-                                          const vector<Blob<Dtype>*>& top) {
+                                            const vector<Blob<Dtype>*>& top) {
   BaseDataType cpu_dtype = sizeof(Dtype) ==4 ? DT_FLOAT32: DT_DOUBLE;
-  BaseDataType mlu_dtype = DT_FLOAT16;
-  BaseDataType mlu_dtype_blob = this->layer_param_.blobs_dtype_size() > 0 ?
-      this->layer_param_.blobs_dtype(0).type() : DT_FLOAT16;
+  BaseDataType mlu_dtype = bottom[0]->mlu_type();
 
-  vector<int> true_dropout_shape(4, 1);
+  vector<int> true_dropout_shape(bottom[0]->num_axes(), 1);
   true_dropout_shape[1] = bottom[0]->shape()[1];
 
-  this->weight.Reshape(true_dropout_shape, cpu_dtype, mlu_dtype_blob, CNML_CONST);
+  this->weight.Reshape(true_dropout_shape, cpu_dtype, mlu_dtype, CNML_CONST);
   if (this->scale_train_) {
     caffe_set(this->weight.count(),
               Dtype(1),
@@ -63,14 +61,12 @@ void MLUDropoutLayer<Dtype>::Reshape_tensor(const vector<Blob<Dtype>*>& bottom,
               this->weight.mutable_cpu_data());
   }
 
-  zero_bias_data_.Reshape(true_dropout_shape, cpu_dtype, mlu_dtype_blob, CNML_CONST);
+  zero_bias_data_.Reshape(true_dropout_shape, cpu_dtype, mlu_dtype, CNML_CONST);
   caffe_set(this->zero_bias_data_.count(),
             Dtype(0),
             this->zero_bias_data_.mutable_cpu_data());
 
-  if (bottom[0] != top[0]) {
-    top[0]->Reshape(bottom[0]->shape(), cpu_dtype, mlu_dtype, CNML_TENSOR);
-  }
+  top[0]->Reshape(bottom[0]->shape(), cpu_dtype, mlu_dtype, CNML_TENSOR);
 }
 
 template <typename Dtype>
@@ -85,7 +81,7 @@ template <typename Dtype>
 void MLUDropoutLayer<Dtype>::MLUCompileOp() {
   MLU_CHECK(cnmlCompileBaseOp(mlu_dropout_op_ptr_,
                               Caffe::rt_core(),
-                              Caffe::model_parallel()));
+                              Caffe::core_number()));
 }
 
 template <typename Dtype>
@@ -94,19 +90,19 @@ void MLUDropoutLayer<Dtype>::fuse(MFusion<Dtype>* fuser) {
 }
 
 template <typename Dtype>
-void MLUDropoutLayer<Dtype>::MLUCreateOpBindData(
-    const vector<Blob<Dtype>*>& bottom,
-    const vector<Blob<Dtype>*>& top) {
+void MLUDropoutLayer<Dtype>::MLUCreateOpBindData(const vector<Blob<Dtype>*>& bottom,
+                                                 const vector<Blob<Dtype>*>& top) {
 
-  MLU_CHECK(cnmlBindConstData(weight.mlu_tensor(),
-                              weight.cpu_tensor(),
-                              weight.mutable_cpu_data()));
+  MLU_CHECK(cnmlBindConstData_V2(weight.mlu_tensor(),
+                              weight.sync_data(),
+                              false));
 
-  MLU_CHECK(cnmlBindConstData(zero_bias_data_.mlu_tensor(),
-                              zero_bias_data_.cpu_tensor(),
-                              zero_bias_data_.mutable_cpu_data()));
+  MLU_CHECK(cnmlBindConstData_V2(zero_bias_data_.mlu_tensor(),
+                              zero_bias_data_.sync_data(),
+                              false));
 
-  MLU_CHECK(cnmlCreateScaleOp(&mlu_dropout_op_ptr_,
+  MLU_CHECK(cnmlCreateNdScaleOp(&mlu_dropout_op_ptr_,
+                              bottom[0]->mlu_shape().size() - 1,
                               bottom[0]->mlu_tensor(),
                               top[0]->mlu_tensor(),
                               weight.mlu_tensor(),
@@ -116,11 +112,13 @@ void MLUDropoutLayer<Dtype>::MLUCreateOpBindData(
 template <typename Dtype>
 void MLUDropoutLayer<Dtype>::Forward_mlu(const vector<Blob<Dtype>*>& bottom,
                                          const vector<Blob<Dtype>*>& top) {
-  MLU_CHECK(cnmlComputeScaleOpForward_V3(mlu_dropout_op_ptr_,
+  MLU_CHECK(cnmlComputeNdScaleOpForward(mlu_dropout_op_ptr_,
+                                      NULL,
                                       bottom[0]->mutable_mlu_data(),
+                                      NULL,
                                       top[0]->mutable_mlu_data(),
-                                      Caffe::forward_param(),
-                                      Caffe::queue()));
+                                      Caffe::queue(),
+                                      NULL));
 }
 
 template <typename Dtype>

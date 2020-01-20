@@ -13,5 +13,15 @@
 #make lint
  
 echo `pwd`
+echo "Prepare swaps before build."
+free -m
+sudo -s
+mkdir /opt/images/
+rm -rf /opt/images/swap
+dd if=/dev/zero of=/opt/images/swap bs=1024 count=2048000
+mkswap /opt/images/swap
+swapon /opt/images/swap
+echo "After set swap space."
+free -m
 echo "===========build start================"
-./scripts/build_cambriconcaffe.sh -c 
+./scripts/build_cambriconcaffe.sh 

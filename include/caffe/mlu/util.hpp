@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -123,19 +123,24 @@ void sparseFilter(const std::vector<int> shape, const Dtype* fromData,
  *              "int8_channel": channel quantization, scale only
  *              "scale": scale only
  *
- *  @param max_value this is used for multi-batch images in generate_int8_pt,
+ *  @param max_value this is used for multi-batch images in generate_quantized_pt,
  *  leave it for the default nullptr in most cases
  */
 template <typename Dtype>
-BlobDataType get_int8_info(const Blob<Dtype>& blob,
+BlobDataType get_quantized_info(const Blob<Dtype>& blob,
                  const LayerParameter& layer_param,
-                 // this is for multi-batch images in generate_int8_pt
+                 const string& mode,
+                 BaseDataType data_type,
+                 // only weights should get channel quantimizaed
+                 bool channel_quantimize = false,
+                 // this is for multi-batch images in generate_quantized_pt
                  // for bottoms only
                  map<string, Dtype>* const max_value = nullptr,
                  // absmax should be squared for normalize bottom 0
                  // not normalize bottom 1
                  bool is_first_normalize = false) {
-  vector<Dtype> max(1, 0), min(1, 0), abs_max(1, 0), position(1, 0);
+  vector<Dtype> max(1, 0), min(1, 0), abs_max(1, 0),
+    position(1, 0), scale(1, 0);
   int channel = blob.channels();
   int length = blob.count();
   string layer_type = layer_param.type();
@@ -143,13 +148,45 @@ BlobDataType get_int8_info(const Blob<Dtype>& blob,
   bool conv = layer_type == "Convolution";
   bool mlp = layer_type == "InnerProduct";
   string key = layer_param.name();
-  const Dtype* data = blob.cpu_data();
-  min[0] = max[0] = data[0];
-  for (int j = 0; j < length; ++j) {
-    max[0] = std::max(data[j], max[0]);
-    min[0] = std::min(data[j], min[0]);
+  if ((conv || mlp) && (mode == "int8_channel") && channel_quantimize) {
+    int num_output, step;
+    if (conv) {
+      num_output = layer_param.convolution_param().num_output();
+      int kernel_h, kernel_w;
+      if (layer_param.convolution_param().kernel_size_size()) {
+       kernel_h = kernel_w = layer_param.convolution_param().kernel_size(0);
+      } else {
+        kernel_h = layer_param.convolution_param().kernel_h();
+        kernel_w = layer_param.convolution_param().kernel_w();
+      }
+      step = channel * kernel_h * kernel_w;
+    } else {
+      num_output = layer_param.inner_product_param().num_output();
+      step = channel * blob.height() * blob.width();
+    }
+    max.resize(num_output);
+    min.resize(num_output);
+    abs_max.resize(num_output);
+    position.resize(num_output);
+    scale.resize(num_output);
+    for (int c = 0; c < num_output; c++) {
+      max[c] = min[c] =  blob.cpu_data()[c * step];
+      for (int index = 0; index < step; index++) {
+        Dtype data = blob.cpu_data()[c * step + index];
+        max[c] = std::max(data, max[c]);
+        min[c] = std::min(data, min[c]);
+      }
+      abs_max[c] = std::max(std::abs(min[c]), std::abs(max[c]));
+    }
+  } else {
+    const Dtype* data = blob.cpu_data();
+    min[0] = max[0] = data[0];
+    for (int j = 0; j < length; ++j) {
+      max[0] = std::max(data[j], max[0]);
+      min[0] = std::min(data[j], min[0]);
+    }
+    abs_max[0] = std::max(std::abs(min[0]), std::abs(max[0]));
   }
-  abs_max[0] = std::max(std::abs(min[0]), std::abs(max[0]));
   if (max_value != nullptr) {
     for (int i = 0; i < abs_max.size(); i++) {
       auto iter = max_value->find(key);
@@ -169,18 +206,35 @@ BlobDataType get_int8_info(const Blob<Dtype>& blob,
   } else if (is_first_normalize) {
     abs_max[0] *= abs_max[0];
   }
+
+  int critical_value = std::pow(2, 7) - 1;
+  if (data_type == DT_INT8) {
+    critical_value = std::pow(2, 7) - 1;
+  } else if (data_type == DT_INT16) {
+    critical_value = std::pow(2, 15) - 1;
+  }
+
   BlobDataType blob_dtype;
   for (int i = 0; i < abs_max.size(); i++) {
     if (abs_max[i] == 0) {
       position[i] = 0;
+      scale[i] = 1;
     } else {
-      position[i] = log2(abs_max[i] / 127);
+      position[i] = log2(abs_max[i] / critical_value);
       position[i] += position[i] > 0 ? 1 : 0;
+      scale[i] = critical_value * pow(2, static_cast<int>(position[i])) / abs_max[i];
     }
     if (position[i] > 32) position[i] = 32;
     if (position[i] < -32) position[i] = -32;
-    blob_dtype.set_type(DT_INT8);
-    blob_dtype.add_position(position[i]);
+    if (mode == "common" || lrn) {
+      blob_dtype.set_type(data_type);
+      blob_dtype.add_position(position[i]);
+      blob_dtype.add_scale(scale[i]);
+    } else if (mode == "scale" || mode == "int8_channel") {
+      Dtype new_scale =  pow(2, static_cast<int>(-position[i])) * scale[i];
+      blob_dtype.set_type(data_type);
+      blob_dtype.add_scale(new_scale);
+    }
   }
   return blob_dtype;
 }

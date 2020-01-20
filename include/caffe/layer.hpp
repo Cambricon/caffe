@@ -2,7 +2,7 @@
 All modification made by Cambricon Corporation: © 2018--2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -31,7 +31,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define INCLUDE_CAFFE_LAYER_HPP_
 
 #include <algorithm>
-#include <chrono>
+#include <chrono> // NOLINT
 #include <map>
 #include <string>
 #include <vector>
@@ -41,6 +41,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "caffe/mlu/fusion.hpp"
 #include "caffe/proto/caffe.pb.h"
 #include "caffe/util/math_functions.hpp"
+#include "cnplugin.h"
 
 /**
  Forward declare boost::thread instead of including boost/thread.hpp
@@ -161,15 +162,42 @@ class Layer {
     Reshape(bottom, top);
   }
 
+  virtual void debug_dtype_info(const vector<Blob<Dtype>*>& bottom,
+                        const vector<Blob<Dtype>*>& top) {
+    LOG(INFO) << "------------------------------------";
+    LOG(INFO) << "reshape_mlu: " << layer_param_.name();
+    LOG(INFO) << "Layer Type: " << layer_param_.type();
+    if (layer_param_.type() != "Input") {
+      for (int i = 0; i < bottom.size(); i++) {
+        LOG(INFO) << "bottom dtype: "
+          << to_str_dtype(bottom[0]->mlu_type());
+        LOG(INFO) << "bottom shape: " << bottom[0]->shape_string();
+      }
+
+    }
+    for (int i = 0; i < top.size(); i++) {
+      LOG(INFO) << "top dtype: " << to_str_dtype(top[0]->mlu_type());
+      LOG(INFO) << "top shape: " << top[0]->shape_string();
+    }
+    for (int i = 0; i < blobs_.size(); i++) {
+      LOG(INFO) << "blobs[" << i << "] dtype: "
+        << to_str_dtype(blobs_[i]->mlu_type());
+      LOG(INFO) << "blobs shape: " << blobs_[i]->shape_string();
+    }
+  }
+
   /**
    * @brief Reshape blobs in MLU mode.
    *
    */
+
   virtual void Reshape_mlu(const vector<Blob<Dtype>*>& bottom,
                            const vector<Blob<Dtype>*>& top) {
     MLUDestroyOp();
     Reshape_tensor(bottom, top);
     MLUCreateOpBindData(bottom, top);
+    if (layer_param_.debug_dtype())
+      debug_dtype_info(bottom, top);
     MLUCompileOp();
   }
 
@@ -182,6 +210,8 @@ class Layer {
       MLUDestroyOp();
       Reshape_tensor(bottom, top);
       MLUCreateOpBindData(bottom, top);
+      if (layer_param_.debug_dtype())
+              debug_dtype_info(bottom, top);
     } else {
       Reshape_mlu(bottom, top);
     }
@@ -304,6 +334,11 @@ class Layer {
    * @brief Set the optimization level of layer.
    */
   virtual void set_optimization_level(int level) {}
+
+  /**
+   * @brief Set the int8 context of layer.
+   */
+  virtual void set_int8_context(bool int8_mode) {}
 
   /**
    * @brief Returns the exact number of bottom blobs required by the layer,
@@ -470,7 +505,8 @@ class Layer {
    */
   virtual void Forward_mfus(const vector<Blob<Dtype>*>& bottom,
                             const vector<Blob<Dtype>*>& top) {
-    LOG(WARNING) << __func__ << ": Using Forward_mlu() for " << type()
+    if (!boost::iequals(type(), "Input"))
+      LOG(WARNING) << __func__ << ": Using Forward_mlu() for " << type()
                  << " as no Forward_mfus().";
     CHECK(!mfus_supported());
     return Forward_mlu(bottom, top);
@@ -679,11 +715,9 @@ inline Dtype Layer<Dtype>::Forward(const vector<Blob<Dtype>*>& bottom,
         cnrtCreateNotifier(&notifierBeginning);
         cnrtCreateNotifier(&notifierEnd);
         cnrtPlaceNotifier(notifierBeginning, Caffe::queue());
-
         Forward_mlu(bottom, top);
-        CNRT_CHECK(cnrtSyncQueue(Caffe::queue()));
-
         cnrtPlaceNotifier(notifierEnd, Caffe::queue());
+        CNRT_CHECK(cnrtSyncQueue(Caffe::queue()));
         cnrtNotifierDuration(notifierBeginning, notifierEnd, &event_time_);
         LOG(INFO) << "layer " << layer_param_.name()
                   << " hardware time: " << event_time_ << " us";

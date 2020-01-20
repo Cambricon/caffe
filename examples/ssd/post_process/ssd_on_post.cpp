@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -48,23 +48,123 @@ using std::string;
 
 template <typename Dtype, template <typename> class Qtype>
 void SsdOnPostProcessor<Dtype, Qtype>::runParallel() {
+  OnRunner<Dtype, Qtype> *runner = static_cast<OnRunner<Dtype, Qtype>*>(this->runner_);
+  ::setupConfig(this->threadId_, runner->deviceId(), runner->deviceSize());
+  this->readLabels(&this->labelNameMap);
+  int TASK_NUM = SimpleInterface::thread_num;
+  caffe::Net<float>* netBuff = runner->net();
+  int outputCount = netBuff->output_blobs()[0]->count();
+  outCpuPtrs_ = new Dtype[outputCount];
+  size_t tensorSize;
+  MLU_CHECK(cnmlGetTensorSize_V2(netBuff->output_blobs()[0]->mlu_tensor(), &tensorSize));
+  std::vector<std::future<void>> futureVector;
+  while (true) {
+    Dtype* outputMluPtr = runner->popValidOutputData();
+    Dtype* outputSyncPtr = runner->popValidOutputSyncData();
+    if (nullptr == outputMluPtr) break;  // no more work, exit
+
+    auto outputBlob = netBuff->output_blobs()[0];
+    Timer timer;
+    CNRT_CHECK(cnrtMemcpy(outputSyncPtr, outputMluPtr,
+          tensorSize, CNRT_MEM_TRANS_DIR_DEV2HOST));
+    cnrtDataType_t cpuDtype = to_cnrt_dtype(outputBlob->cpu_type());
+    cnrtDataType_t mluDtype = to_cnrt_dtype(outputBlob->mlu_type());
+    int dim_values[4] = {outputBlob->mlu_shape()[0], outputBlob->mlu_shape()[1],
+                         outputBlob->mlu_shape()[2], outputBlob->mlu_shape()[3]};
+    int dim_order[4] = {0, 3, 1, 2};
+    if (mluDtype != cpuDtype) {
+      CNRT_CHECK(cnrtTransOrderAndCast(reinterpret_cast<void*>(outputSyncPtr),
+                                       mluDtype,
+                                       reinterpret_cast<void*>(outCpuPtrs_),
+                                       cpuDtype,
+                                       nullptr,
+                                       outputBlob->mlu_shape().size(),
+                                       dim_values,
+                                       dim_order));
+    } else {
+      CNRT_CHECK(cnrtTransDataOrder(reinterpret_cast<void*>(outputSyncPtr),
+                                    cpuDtype,
+                                    reinterpret_cast<void*>(outCpuPtrs_),
+                                    outputBlob->mlu_shape().size(),
+                                    dim_values,
+                                    dim_order));
+    }
+    resultDataPtr_ = outCpuPtrs_;
+    timer.log("copyout time ...");
+    runner->pushFreeOutputData(outputMluPtr);
+    runner->pushFreeOutputSyncData(outputSyncPtr);
+
+    Timer postProcess;
+    vector<cv::Mat> imgs;
+    vector<string> img_names;
+    vector<cv::Scalar> colors;
+    vector<vector<vector<float>>> detections = getResults(&imgs, &img_names, &colors);
+
+    Timer dumpTimer;
+    if (FLAGS_dump) {
+      const float threshold = FLAGS_confidencethreshold;
+      const int size = imgs.size();
+      if (TASK_NUM > size)
+        TASK_NUM = size;
+      const int delta = size / TASK_NUM;
+      int from = 0;
+      int to = delta;
+      for (int i = 0; i < TASK_NUM; i++) {
+        from = delta * i;
+        if (i == TASK_NUM - 1) {
+          to = size;
+        } else {
+          to = delta * (i + 1);
+        }
+
+        auto func = this->tp_->add([](const vector<cv::Mat>& imgs,
+                    const vector<vector<vector<float>>>& detections,
+                    const float threshold,
+                    const vector<cv::Scalar>& colors,
+                    const map<int, string>& labelNameMap,
+                    const vector<string>& img_names,
+                    const int& from,
+                    const int& to,
+                    SsdProcessor<Dtype, Qtype>* object) {
+          object->WriteVisualizeBBox(imgs,
+                    detections,
+                    threshold,
+                    colors,
+                    labelNameMap,
+                    img_names,
+                    from,
+                    to);
+        }, imgs, detections, threshold, colors,
+           this->labelNameMap, img_names, from, to, this);
+
+        futureVector.push_back(std::move(func));
+      }
+    }
+    dumpTimer.log("dump out time ...");
+    postProcess.log("post process time ...");
+  }
+  for (int i = 0; i < futureVector.size(); i++) {
+    futureVector[i].get();
+  }
 }
 
 template <typename Dtype, template <typename> class Qtype>
 void SsdOnPostProcessor<Dtype, Qtype>::runSerial() {
+  OnRunner<Dtype, Qtype> * runner = static_cast<OnRunner<Dtype, Qtype>*>(this->runner_);
   if (!this->initSerialMode) {
     this->readLabels(&this->labelNameMap);
-
     this->initSerialMode = true;
   }
-
+  caffe::Net<float>* netBuff = runner->net();
+  auto outputBlob = netBuff->output_blobs()[0];
+  resultDataPtr_ = outputBlob->mutable_cpu_data();
   vector<cv::Mat> imgs;
   vector<string> img_names;
   vector<cv::Scalar> colors;
   vector<vector<vector<float> > > detections = getResults(&imgs, &img_names, &colors);
 
-  this->WriteVisualizeBBox_offline(imgs, detections, FLAGS_confidencethreshold,
-                                   colors, this->labelNameMap, img_names);
+  this->WriteVisualizeBBox(imgs, detections, FLAGS_confidencethreshold,
+                                   colors, this->labelNameMap, img_names, 0, imgs.size());
 }
 
 template <typename Dtype, template <typename> class Qtype>
@@ -73,14 +173,10 @@ vector<vector<vector<float> > > SsdOnPostProcessor<Dtype, Qtype>::getResults(
                                          vector<string> *img_names,
                                          vector<cv::Scalar> *colors) {
   OnRunner<Dtype, Qtype> * runner = static_cast<OnRunner<Dtype, Qtype>*>(this->runner_);
-
-  caffe::Net<float>* netBuff = runner->net();
-  auto outputBlob = netBuff->output_blobs()[0];
-  float* data = outputBlob->mutable_cpu_data();
-
-  vector<vector<vector<float> > > detections(runner->n());
+  float* data = resultDataPtr_;
+  vector<vector<vector<float>>> detections;
   if (caffe::Caffe::mode() == caffe::Caffe::CPU) {
-    int numDet = outputBlob->height();
+    int numDet = runner->outHeight();
     for (int k = 0; k < numDet; ++k) {
       if (data[0] == -1) {
         // Skip invalid detection.
@@ -92,23 +188,18 @@ vector<vector<vector<float> > > SsdOnPostProcessor<Dtype, Qtype>::getResults(
       data += 7;
     }
   } else {
-    for (int k = 0; k < runner->outCount() / runner->outWidth(); ++k) {
-      if (data[4] == 0) {
-        // the score(outputCpuPtr[4]) must be 0 if invalid detection, so skip it.
-        data += runner->outWidth();
-        continue;
+    // BangOp implementation
+    int count = runner->outChannel();
+    for (int i = 0; i < runner->outNum(); i++) {
+      int output_num = data[i * count];
+      vector<vector<float>> batch_detection;
+      for (int k = 0; k < output_num; k++) {
+         int index = i * count + 64 + k * 7;
+         if (static_cast<int>(data[index]) != i) continue;
+         vector<float> single_detection(data + index, data + index + 7);
+         batch_detection.push_back(single_detection);
       }
-      int batch = k / runner->outChannel();
-      vector<float> detection(7, 0);
-      detection[0] = batch;
-      detection[1] = data[5];
-      detection[2] = data[4];
-      detection[3] = data[0];
-      detection[4] = data[1];
-      detection[5] = data[2];
-      detection[6] = data[3];
-      detections[batch].push_back(detection);
-      data += runner->outWidth();
+      detections.push_back(batch_detection);
     }
   }
 

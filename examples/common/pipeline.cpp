@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -52,7 +52,7 @@ std::condition_variable Pipeline<Dtype, Qtype>::condition;
 template <typename Dtype, template <typename> class Qtype>
 std::mutex Pipeline<Dtype, Qtype>::condition_m;
 template <typename Dtype, template <typename> class Qtype>
-int Pipeline<Dtype, Qtype>::start;
+int Pipeline<Dtype, Qtype>::start = 0;
 template <typename Dtype, template <typename> class Qtype>
 vector<thread*> Pipeline<Dtype, Qtype>::stageThreads;
 template <typename Dtype, template <typename> class Qtype>
@@ -60,8 +60,11 @@ vector<Pipeline<Dtype, Qtype>*> Pipeline<Dtype, Qtype>::pipelines;
 
 template <typename Dtype, template <typename> class Qtype>
 Pipeline<Dtype, Qtype>::Pipeline(DataProvider<Dtype, Qtype> *provider,
-                      Runner<Dtype, Qtype> *runner,
-                      PostProcessor<Dtype, Qtype> *postprocessor) {
+                                 Runner<Dtype, Qtype> *runner,
+                                 PostProcessor<Dtype, Qtype> *postprocessor)
+                                 : data_provider_(nullptr),
+                                   runner_(nullptr),
+                                   postProcessor_(nullptr) {
   data_provider_ = provider;
   runner_ = runner;
   postProcessor_ = postprocessor;
@@ -79,21 +82,77 @@ Pipeline<Dtype, Qtype>::Pipeline(DataProvider<Dtype, Qtype> *provider,
 }
 
 template <typename Dtype, template <typename> class Qtype>
+Pipeline<Dtype, Qtype>::Pipeline(const vector<DataProvider<Dtype, Qtype>*>& providers,
+                                 Runner<Dtype, Qtype> *runner,
+                                 PostProcessor<Dtype, Qtype> *postprocessor)
+                                 : data_provider_(nullptr),
+                                   runner_(nullptr),
+                                   postProcessor_(nullptr) {
+  CHECK(providers.size() > 0) << "[Error]the size of providers should greater than 0.";
+  runner_ = runner;
+  postProcessor_ = postprocessor;
+
+  postProcessor_->setRunner(runner_);
+  runner_->setPostProcessor(postProcessor_);
+  postProcessor_->setThreadId(runner_->threadId());
+
+  data_providers_ = providers;
+  for (auto data_provider : data_providers_) {
+    data_provider->setRunner(runner_);
+    data_provider->setThreadId(runner_->threadId());
+#ifdef PRE_READ
+    data_provider->preRead();
+#endif
+  }
+}
+
+template <typename Dtype, template <typename> class Qtype>
 Pipeline<Dtype, Qtype>::~Pipeline() {
-  delete runner_;
-  delete data_provider_;
-  delete postProcessor_;
+  // delete data_providers_ only for simple compile
+  for (auto data_provider : data_providers_) {
+    delete data_provider;
+  }
+
+  // delete data_provider_ only for flexible compile
+  if (data_provider_) {
+    delete data_provider_;
+  }
+
+  if (runner_) {
+    delete runner_;
+  }
+
+  if (postProcessor_) {
+    delete postProcessor_;
+  }
 }
 
 template <typename Dtype, template <typename> class Qtype>
 void Pipeline<Dtype, Qtype>::runParallel() {
-  vector<thread*> threads(3, nullptr);
-  threads[0] = new thread(&DataProvider<Dtype, Qtype>::runParallel, data_provider_);
-  threads[1] = new thread(&Runner<Dtype, Qtype>::runParallel, runner_);
-  threads[2] = new thread(&PostProcessor<Dtype, Qtype>::runParallel, postProcessor_);
-  for (auto th : threads) {
-    th->join();
-    delete th;
+  int data_provider_num = (data_providers_.size() == 0) ? 1 : data_providers_.size();
+  vector<thread*> threads(data_provider_num + 2, nullptr);
+
+  for (int i = 0; i < data_provider_num; i++) {
+    threads[i] = new thread(&DataProvider<Dtype, Qtype>::runParallel,
+        data_providers_[i]);
+  }
+
+  threads[data_provider_num] = new thread(&Runner<Dtype, Qtype>::runParallel, runner_);
+  threads[data_provider_num + 1] = new thread(&PostProcessor<Dtype, Qtype>::runParallel,
+                                              postProcessor_);
+
+  for (int i = 0; i < data_provider_num; i++) {
+    threads[i]->join();
+    delete threads[i];
+  }
+  // push a nullptr for simple compile when the thread of data provider finished tasks
+  runner_->pushValidInputData(nullptr);
+  runner_->pushValidInputSyncData(nullptr);
+  runner_->pushValidInputSyncTmpData(nullptr);
+
+  for (int i = 0; i < 2; i++) {
+    threads[data_provider_num + i]->join();
+    delete threads[data_provider_num + i];
   }
 }
 

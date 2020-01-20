@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -29,21 +29,22 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #ifdef USE_MLU
 #include <vector>
-
 #include "caffe/layers/mlu_relu_layer.hpp"
 
 namespace caffe {
 
 template <typename Dtype>
 void MLUReLULayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& bottom,
-      const vector<Blob<Dtype>*>& top) {
+                                     const vector<Blob<Dtype>*>& top) {
   ReLULayer<Dtype>::LayerSetUp(bottom, top);
+  BaseDataType cpu_dtype = sizeof(Dtype) == 4 ? DT_FLOAT32 : DT_DOUBLE;
+  BaseDataType mlu_dtype = bottom[0]->mlu_type();
   Dtype negative_slope = this->layer_param_.relu_param().negative_slope();
   this->upper_limit_ = this->layer_param_.relu_param().upper_limit();
   if (negative_slope != 0) {
     vector<int> slope_shape(4, 1);
-    slope_shape[1] = bottom[0]->channels();
-    slope_data_.Reshape(slope_shape, DT_FLOAT32, DT_FLOAT16, CNML_CONST);
+    // slope_shape[1] = bottom[0]->channels();
+    slope_data_.Reshape(slope_shape, cpu_dtype, mlu_dtype, CNML_CONST);
     caffe_set(slope_data_.count(),
               Dtype(negative_slope),
               slope_data_.mutable_cpu_data());
@@ -55,7 +56,7 @@ void MLUReLULayer<Dtype>::Reshape_tensor(const vector<Blob<Dtype>*>& bottom,
                                          const vector<Blob<Dtype>*>& top) {
   CHECK(bottom.size() == 1 && top.size() == 1);
   BaseDataType cpu_dtype = sizeof(Dtype) == 4 ? DT_FLOAT32 : DT_DOUBLE;
-  BaseDataType mlu_dtype = DT_FLOAT16;
+  BaseDataType mlu_dtype = bottom[0]->mlu_type();
   if (top[0] != bottom[0]) {
     top[0]->Reshape(bottom[0]->shape(), cpu_dtype, mlu_dtype, CNML_TENSOR);
   } else {
@@ -72,10 +73,6 @@ void MLUReLULayer<Dtype>::MLUDestroyOp() {
     MLU_CHECK(cnmlDestroyBaseOp(&relu_active_op_ptr_));
     relu_active_op_ptr_ = nullptr;
   }
-  if (min_tc_op_ptr_ != nullptr) {
-    MLU_CHECK(cnmlDestroyBaseOp(&min_tc_op_ptr_));
-    min_tc_op_ptr_ = nullptr;
-  }
 }
 
 template <typename Dtype>
@@ -89,22 +86,16 @@ void MLUReLULayer<Dtype>::MLUCreateOpBindData(
                                temp_relu_.mlu_tensor() :
                                top[0]->mlu_tensor(),
                                slope_data_.mlu_tensor()));
-    MLU_CHECK(cnmlBindConstData(slope_data_.mlu_tensor(),
-        slope_data_.cpu_tensor(),
-        reinterpret_cast<float*>(slope_data_.mutable_cpu_data())));
+    MLU_CHECK(cnmlBindConstData_V2(slope_data_.mlu_tensor(),
+                                   slope_data_.sync_data(),
+                                   false));
   } else {
     MLU_CHECK(cnmlCreateActiveOp(&relu_active_op_ptr_,
-                                cnmlActiveFunction_t::CNML_ACTIVE_RELU,
-                                bottom[0]->mlu_tensor(),
-                                this->upper_limit_ ?
-                                temp_relu_.mlu_tensor() :
-                                top[0]->mlu_tensor()));
-  }
-  if (upper_limit_) {
-    MLU_CHECK(cnmlCreateMinTCOp(&min_tc_op_ptr_,
-                               temp_relu_.mlu_tensor(),
-                               top[0]->mlu_tensor(),
-                               Dtype(upper_limit_)));
+                                  cnmlActiveFunction_t::CNML_ACTIVE_RELU,
+                                   bottom[0]->mlu_tensor(),
+                                   this->upper_limit_ ?
+                                   temp_relu_.mlu_tensor() :
+                                   top[0]->mlu_tensor()));
   }
 }
 
@@ -112,12 +103,7 @@ template<typename Dtype>
 void MLUReLULayer<Dtype>::MLUCompileOp() {
     MLU_CHECK(cnmlCompileBaseOp(relu_active_op_ptr_,
                                 Caffe::rt_core(),
-                                Caffe::model_parallel()));
-    if (upper_limit_) {
-      MLU_CHECK(cnmlCompileBaseOp(min_tc_op_ptr_,
-                                  Caffe::rt_core(),
-                                  Caffe::model_parallel()));
-    }
+                                Caffe::core_number()));
 }
 
 template <typename Dtype>
@@ -135,21 +121,13 @@ void MLUReLULayer<Dtype>::Forward_mlu(const vector<Blob<Dtype>*>& bottom,
                                       top[0]->mutable_mlu_data(),
                                       Caffe::forward_param(),
                                       Caffe::queue()));
-  if (upper_limit_) {
-  MLU_CHECK(cnmlComputeMinTCOpForward_V3(min_tc_op_ptr_,
-                                      temp_relu_.mutable_mlu_data(),
-                                      top[0]->mutable_mlu_data(),
-                                      Caffe::forward_param(),
-                                      Caffe::queue()));
-  }
 }
 template<typename Dtype>
 void MLUReLULayer<Dtype>::fuse(MFusion<Dtype>* fuser) {
   fuser->fuse(relu_active_op_ptr_);
-  if (upper_limit_) fuser->fuse(min_tc_op_ptr_);
 }
+
 INSTANTIATE_CLASS(MLUReLULayer);
 
 }  // namespace caffe
-#endif
-
+#endif  // USE_MLU

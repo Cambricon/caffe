@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -44,25 +44,35 @@ template<typename Dtype, template <typename> class Qtype>
 void ClassOffPostProcessor<Dtype, Qtype>::runSerial() {
   OffRunner<Dtype, Qtype> * infr = static_cast<OffRunner<Dtype, Qtype>*>(this->runner_);
   if (!this->initSerialMode) {
-    this->outCount_ = infr->outCount();
+    this->outCount_ = infr->outCounts()[0];
     this->outN_ = infr->outNum();
 
     this->readLabels(&this->labels);
 
     outCpuPtrs_ = new(Dtype);
-    outCpuPtrs_[0] = new float[infr->outCount()];
-
+    outCpuPtrs_[0] = new float[infr->outCounts()[0]];
+    syncCpuPtrs_ = malloc(infr->outputSizeArray()[0]);
     this->initSerialMode = true;
   }
 
-  Dtype* mluOutData = infr->popValidOutputData();
+  int dim_values[4] = {infr->outNum(), infr->outHeight(),
+      infr->outWidth(), infr->outChannel()};
+  int dim_order[4] = {0, 3, 1, 2};
 
-  CNRT_CHECK(cnrtMemcpyBatchByDescArray(outCpuPtrs_,
-                                        mluOutData,
-                                        infr->outDescs(),
-                                        1,
-                                        1,
-                                        CNRT_MEM_TRANS_DIR_DEV2HOST));
+  Dtype* mluOutData = infr->popValidOutputData();
+  CNRT_CHECK(cnrtMemcpy(syncCpuPtrs_, mluOutData[0],
+                        infr->outputSizeArray()[0],
+                        CNRT_MEM_TRANS_DIR_DEV2HOST));
+  cnrtDataType_t cpuDtype = CNRT_FLOAT32;
+  cnrtDataType_t mluDtype = infr->mluOutputDtype()[0];
+  if (cpuDtype != mluDtype) {
+    CNRT_CHECK(cnrtTransOrderAndCast(syncCpuPtrs_, mluDtype,
+          outCpuPtrs_[0], cpuDtype,
+          nullptr, 4, dim_values, dim_order));
+  } else {
+    CNRT_CHECK(cnrtTransDataOrder(syncCpuPtrs_, cpuDtype,
+          outCpuPtrs_[0], 4, dim_values, dim_order));
+  }
 
   infr->pushFreeOutputData(mluOutData);
   float* data = reinterpret_cast<float*>(outCpuPtrs_[0]);

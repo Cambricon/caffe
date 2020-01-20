@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -29,20 +29,20 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #ifndef INCLUDE_CAFFE_LAYERS_MLU_REORG_LAYER_HPP_
 #define INCLUDE_CAFFE_LAYERS_MLU_REORG_LAYER_HPP_
+#ifdef USE_MLU
 
 #include <vector>
-
 #include "caffe/blob.hpp"
 #include "caffe/layer.hpp"
 #include "caffe/proto/caffe.pb.h"
-
 #include "caffe/layers/reorg_layer.hpp"
 
 namespace caffe {
 
-#ifdef USE_MLU
 /**
  * @brief MLU acceleration of ReorgLayer
+ *        Reorg layer reorganizes a larger feature map into some smaller
+ *  feature maps for multi-scale detection.
  */
 template <typename Dtype>
 class MLUReorgLayer : public ReorgLayer<Dtype> {
@@ -69,8 +69,6 @@ class MLUReorgLayer : public ReorgLayer<Dtype> {
   cnmlBaseOp_t reorg_op_ptr_;
   cnmlReorgOpParam_t param;
 };
-#endif
-
 }  // namespace caffe
-
+#endif  // USE MLU
 #endif  // INCLUDE_CAFFE_LAYERS_MLU_REORG_LAYER_HPP_
