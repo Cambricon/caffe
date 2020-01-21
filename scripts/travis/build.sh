@@ -15,6 +15,7 @@
 echo `pwd`
 echo "Prepare swaps before build."
 free -m
+sudo -E echo "kernel.pid_max=1000000 " >> /etc/sysctl.conf
 mkdir /opt/images/
 rm -rf /opt/images/swap
 dd if=/dev/zero of=/opt/images/swap bs=8M count=3072
