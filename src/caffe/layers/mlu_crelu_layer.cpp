@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -28,8 +28,9 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
 #ifdef USE_MLU
-#include "caffe/layers/mlu_crelu_layer.hpp"
 #include <vector>
+#include "caffe/layers/mlu_crelu_layer.hpp"
+
 namespace caffe {
 
 template <typename Dtype>
@@ -44,7 +45,7 @@ template <typename Dtype>
 void MLUCReLULayer<Dtype>::Reshape_tensor(const vector<Blob<Dtype>*>& bottom,
                                           const vector<Blob<Dtype>*>& top) {
   BaseDataType cpu_dtype = sizeof(Dtype) == 4 ? DT_FLOAT32:DT_DOUBLE;
-  BaseDataType mlu_dtype = DT_FLOAT16;
+  BaseDataType mlu_dtype = bottom[0]->mlu_type();
   vector<int> top_shape(bottom[0]->shape());
   top_shape[this->concat_axis_] = bottom[0]->shape(this->concat_axis_) * 2;
   top[0]->Reshape(top_shape, cpu_dtype, mlu_dtype, CNML_TENSOR);
@@ -75,10 +76,6 @@ void MLUCReLULayer<Dtype>::MLUDestroyOp() {
     MLU_CHECK(cnmlDestroyBaseOp(&prelu_op_ptr_));
     prelu_op_ptr_ = NULL;
   }
-  if (concat_param_ptr_ != NULL) {
-    MLU_CHECK(cnmlDestroyConcatOpParam(&concat_param_ptr_));
-    concat_param_ptr_ = NULL;
-  }
 }
 
 template <typename Dtype>
@@ -86,24 +83,22 @@ void MLUCReLULayer<Dtype>::MLUCreateOpBindData(
     const vector<Blob<Dtype>*>& bottom,
     const vector<Blob<Dtype>*>& top) {
   //  Please refer to comments in mlu_crelu_layer.hpp
-  cnmlConcatMode_t concatModes[4] {
-                                    cnmlConcatMode_t::CNML_CONCAT_BATCH,
-                                    cnmlConcatMode_t::CNML_CONCAT_FEAT,
-                                    cnmlConcatMode_t::CNML_CONCAT_HIGHT,
-                                    cnmlConcatMode_t::CNML_CONCAT_WIDTH
-                                  };
   MLU_CHECK(cnmlCreateMinusOp(&minus_op_ptr_,
                               bottom[0]->mlu_tensor(),
                               negative_input_.mlu_tensor()));
-  MLU_CHECK(cnmlCreateConcatOpParam(&concat_param_ptr_,
-                              2,  //  input_num
-                              1,  //  output_num
-                              concatModes[this->concat_axis_]));
   cnmlTensor_t input_tensors[2] = {bottom[0]->mlu_tensor(),
                                   negative_input_.mlu_tensor()};
   cnmlTensor_t output_tensor[1] = {concated_data_.mlu_tensor()};
-  MLU_CHECK(cnmlCreateConcatOp(&concat_op_ptr_,
-                              concat_param_ptr_,
+  int length = bottom[0]->shape().size();
+  vector<int> dim_order(length, 1);  // = {0, 3, 1, 2};
+  dim_order[0] = 0;
+  dim_order[1] = length - 1;
+  for (int i = 2; i < length; i++) {
+      dim_order[i] = i-1;
+  }
+  int concat_axis = dim_order[this->concat_axis_];
+  MLU_CHECK(cnmlCreateNdConcatOp(&concat_op_ptr_,
+                              concat_axis,
                               input_tensors,
                               2,
                               output_tensor,
@@ -112,15 +107,15 @@ void MLUCReLULayer<Dtype>::MLUCreateOpBindData(
                               concated_data_.mlu_tensor(),
                               top[0]->mlu_tensor(),
                               negative_slope_b_.mlu_tensor()));
-  MLU_CHECK(cnmlBindConstData(negative_slope_b_.mlu_tensor(),
-                              negative_slope_b_.cpu_tensor(),
+  MLU_CHECK(cnmlBindConstData_V2(negative_slope_b_.mlu_tensor(),
                               reinterpret_cast<float*>
-                              (negative_slope_b_.mutable_cpu_data())));
+                              (negative_slope_b_.sync_data()),
+                              false));
 }
 
 template <typename Dtype>
 void MLUCReLULayer<Dtype>::Forward_mlu(const vector<Blob<Dtype>*>& bottom,
-    const vector<Blob<Dtype>*>& top) {
+                                       const vector<Blob<Dtype>*>& top) {
   MLU_CHECK(cnmlComputeMinusOpForward_V3(minus_op_ptr_,
             bottom[0]->mutable_mlu_data(),
             negative_input_.mutable_mlu_data(),
@@ -148,5 +143,6 @@ MLUCReLULayer<Dtype>::~MLUCReLULayer() {
 }
 
 INSTANTIATE_CLASS(MLUCReLULayer);
+
 }  // namespace caffe
 #endif

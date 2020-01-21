@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -42,7 +42,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 namespace caffe {
 
 /**
- * @brief Sigmoid function non-linearity @f$
+ * @brief MLU acceleration of SigmoidLayer
+ *        Sigmoid function non-linearity @f$
  *         y = (1 + \exp(-x))^{-1}
  *     @f$, a classic choice in neural networks.
  *
@@ -73,9 +74,7 @@ class MLUSigmoidLayer : public SigmoidLayer<Dtype> {
 
   cnmlBaseOp_t sigmoid_active_op_ptr_;
 };
-
 }  // namespace caffe
-
 #endif  // USE_MLU
 #endif  // INCLUDE_CAFFE_LAYERS_MLU_SIGMOID_LAYER_HPP_
 

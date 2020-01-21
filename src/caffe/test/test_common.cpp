@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -75,18 +75,10 @@ TEST_F(CommonTest, TestReshapeMode) {
 }
 
 TEST_F(CommonTest, TestMLUCore) {
-  Caffe::set_rt_core("1H8");
-  EXPECT_EQ(Caffe::rt_core(), CNML_1H8);
-  Caffe::set_rt_core(CNML_1H8);
-  EXPECT_EQ(Caffe::rt_core(), CNML_1H8);
-  Caffe::set_rt_core("1H16");
-  EXPECT_EQ(Caffe::rt_core(), CNML_1H16);
-  Caffe::set_rt_core(CNML_1H16);
-  EXPECT_EQ(Caffe::rt_core(), CNML_1H16);
-  Caffe::set_rt_core("MLU100");
-  EXPECT_EQ(Caffe::rt_core(), CNML_C10);
-  Caffe::set_rt_core(CNML_C10);
-  EXPECT_EQ(Caffe::rt_core(), CNML_C10);
+  Caffe::set_rt_core("MLU220");
+  EXPECT_EQ(Caffe::rt_core(), CNML_MLU220);
+  Caffe::set_rt_core("MLU270");
+  EXPECT_EQ(Caffe::rt_core(), CNML_MLU270);
 }
 
 TEST_F(CommonTest, TestMLUStream) {
@@ -95,13 +87,6 @@ TEST_F(CommonTest, TestMLUStream) {
   EXPECT_NE(Caffe::queue(), nullptr);
   Caffe::freeQueue();
   cnmlExit();
-}
-
-TEST_F(CommonTest, TestMLUDataParallel) {
-  Caffe::setDataParallel(3);
-  EXPECT_EQ(Caffe::data_parallel(), 3);
-  Caffe::setModelParallel(5);
-  EXPECT_EQ(Caffe::model_parallel(), 5);
 }
 #endif
 

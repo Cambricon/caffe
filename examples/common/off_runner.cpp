@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018--2019 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -44,6 +44,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "include/off_runner.hpp"
 #include "include/command_option.hpp"
 #include "include/common_functions.hpp"
+#include "include/runner_strategy.hpp"
 
 
 using std::map;
@@ -54,192 +55,128 @@ using std::thread;
 using std::stringstream;
 
 template<typename Dtype, template <typename> class Qtype>
+OffRunner<Dtype, Qtype>::OffRunner(const cnrtRuntimeContext_t rt_ctx,
+                                   const int& id) {
+  this->rt_ctx_ = rt_ctx;
+  this->threadId_ = id;
+  this->runTime_ = 0;
+  this->simple_flag_ = true;
+
+  cnrtGetRuntimeContextInfo(rt_ctx, CNRT_RT_CTX_FUNCTION,
+         reinterpret_cast<void **>(&this->function_));
+  cnrtGetRuntimeContextInfo(rt_ctx, CNRT_RT_CTX_MODEL_PARALLEL,
+         reinterpret_cast<void **>(&this->Parallel_));
+  cnrtGetRuntimeContextInfo(rt_ctx, CNRT_RT_CTX_DEV_ORDINAL,
+         reinterpret_cast<void **>(&this->deviceId_));
+
+  getIODataDesc();
+  runnerStrategy_ = new SimpleStrategy<Dtype, Qtype>();
+}
+
+template<typename Dtype, template <typename> class Qtype>
 OffRunner<Dtype, Qtype>::OffRunner(const string& offlinemodel,
                                    const int& id,
-                                   const int& dp,
+                                   const int& parallel,
                                    const int& deviceId,
                                    const int& devicesize) {
   this->threadId_ = id;
   this->deviceId_ = deviceId;
   this->deviceSize_ = devicesize;
   this->runTime_ = 0;
-
-  // 1. set current device
+  this->simple_flag_ = false;
   setDeviceId(deviceId);
-
-  // 2. load model and get function
-  LOG(INFO) << "load file: " << offlinemodel.c_str();
-  cnrtLoadModel(&model_, offlinemodel.c_str());
-  int mp;
-  cnrtQueryModelParallelism(model_, &mp);
-  if (FLAGS_dataparallel * mp <= 32) {
-    this->dataParallel_ = dp;
-    this->modelParallel_ = mp;
-  } else {
-    this->dataParallel_ = 1;
-    this->modelParallel_ = 1;
-    LOG(ERROR) << "dataparallel * modelparallel should <= 32, changed them to 1";
-  }
-  const string name = "subnet0";
-  cnrtCreateFunction(&function_);
-  cnrtExtractFunction(&function_, model_, name.c_str());
-
-  // 3. get function's I/O DataDesc
-  cnrtGetInputDataDesc(&inDescs_, &this->inBlobNum_, function_);
-  cnrtGetOutputDataDesc(&outDescs_, &this->outBlobNum_, function_);
-
-#if !defined(CROSS_COMPILE) && !defined(CROSS_COMPILE_ARM64)
-  uint64_t stack_size;
-  cnrtQueryModelStackSize(model_, &stack_size);
-  unsigned int current_device_size;
-  cnrtGetStackMem(&current_device_size);
-  if (stack_size > current_device_size) {
-    cnrtSetStackMem(stack_size + 50);
-  }
-#endif  // CROSS_COMPILE && CROSS_COMPILE_ARM64
-
-  LOG(INFO) << "input blob num is " << this->inBlobNum_;
-  int in_count;
-  for (int i = 0; i < this->inBlobNum_; i++) {
-    unsigned int inN, inC, inH, inW;
-    cnrtDataDesc_t desc = inDescs_[i];
-    cnrtGetHostDataCount(desc, &in_count);
-    if (FLAGS_yuv) {
-      cnrtSetHostDataLayout(desc, CNRT_UINT8, CNRT_NCHW);
-    } else {
-      cnrtSetHostDataLayout(desc, CNRT_FLOAT32, CNRT_NCHW);
-    }
-    cnrtGetDataShape(desc, &inN, &inC, &inH, &inW);
-    in_count *= this->dataParallel_;
-    inN *= this->dataParallel_;
-    LOG(INFO) << "shape " << inN;
-    LOG(INFO) << "shape " << inC;
-    LOG(INFO) << "shape " << inH;
-    LOG(INFO) << "shape " << inW;
-    if (i == 0) {
-      this->inNum_ = inN;
-      this->inChannel_ = inC;
-      this->inWidth_ = inW;
-      this->inHeight_ = inH;
-      this->inCount_ = in_count;
-    } else {
-      cnrtGetHostDataCount(desc, &in_count);
-    }
-  }
-
-  for (int i = 0; i < this->outBlobNum_; i++) {
-    cnrtDataDesc_t desc = outDescs_[i];
-    cnrtSetHostDataLayout(desc, CNRT_FLOAT32, CNRT_NCHW);
-    cnrtGetHostDataCount(desc, &this->outCount_);
-    cnrtGetDataShape(desc, &this->outNum_, &this->outChannel_,
-                      &this->outHeight_, &this->outWidth_);
-    this->outCount_ *= this->dataParallel_;
-    this->outNum_ *= this->dataParallel_;
-    LOG(INFO) << "output shape " << this->outNum_;
-    LOG(INFO) << "output shape " << this->outChannel_;
-    LOG(INFO) << "output shape " << this->outHeight_;
-    LOG(INFO) << "output shape " << this->outWidth_;
-  }
+  loadOfflinemodel(offlinemodel);
+  getIODataDesc();
+  runnerStrategy_ = new FlexibleStrategy<Dtype, Qtype>();
 }
 
 template<typename Dtype, template <typename> class Qtype>
 OffRunner<Dtype, Qtype>::~OffRunner() {
   setDeviceId(this->deviceId_);
-  cnrtDestroyQueue(queue_);
-  cnrtDestroyFunction(function_);
-  cnrtUnloadModel(model_);
-  for (auto ptr : inPtrVector_)
-    cnrtFreeArray(ptr, this->inBlobNum_);
-  for (auto ptr : outPtrVector_)
-    cnrtFreeArray(ptr, this->outBlobNum_);
+  delete runnerStrategy_;
+}
+
+
+// get function's I/O DataDesc
+template<typename Dtype, template <typename> class Qtype>
+void OffRunner<Dtype, Qtype>::getIODataDesc() {
+  CNRT_CHECK(cnrtGetInputDataSize(&this->inputSizeArray_,
+        &this->inBlobNum_, this->function_));
+  CNRT_CHECK(cnrtGetOutputDataSize(&this->outputSizeArray_,
+        &this->outBlobNum_, this->function_));
+  CNRT_CHECK(cnrtGetInputDataType(&this->mluInputDtype_,
+        &this->inBlobNum_, this->function_));
+  CNRT_CHECK(cnrtGetOutputDataType(&this->mluOutputDtype_,
+        &this->outBlobNum_, this->function_));
+  LOG(INFO) << "input blob num is " << this->inBlobNum_;
+
+  this->inCounts_.resize(this->inBlobNum_, 1);
+  this->outCounts_.resize(this->outBlobNum_, 1);
+  this->inDimNums_.resize(this->inBlobNum_, 0);
+  this->outDimNums_.resize(this->outBlobNum_, 0);
+  this->inDimValues_.resize(this->inBlobNum_, nullptr);
+  this->outDimValues_.resize(this->outBlobNum_, nullptr);
+
+  for (int i = 0; i < this->inBlobNum_; i++) {
+    CNRT_CHECK(cnrtGetInputDataShape(&(this->inDimValues_[i]),
+        &(this->inDimNums_[i]), i, this->function_));
+    for (int j = 0; j < this->inDimNums_[i]; ++j) {
+      this->inCounts_[i] *= this->inDimValues_[i][j];
+      LOG(INFO) << "shape " << this->inDimValues_[i][j];
+    }
+    if (i == 0) {
+      this->inNum_ = this->inDimValues_[i][0];
+      this->inChannel_ = this->inDimValues_[i][3];
+      this->inHeight_ = this->inDimValues_[i][1];
+      this->inWidth_ = this->inDimValues_[i][2];
+    }
+  }
+
+  for (int i = 0; i < this->outBlobNum_; i++) {
+    CNRT_CHECK(cnrtGetOutputDataShape(&(this->outDimValues_[i]),
+        &(this->outDimNums_[i]), i, this->function_));
+    for (int j = 0; j < this->outDimNums_[i]; ++j) {
+      this->outCounts_[i] *= this->outDimValues_[i][j];
+      LOG(INFO) << "shape " << this->outDimValues_[i][j];
+    }
+    if (i == 0) {
+      this->outNum_ = this->outDimValues_[i][0];
+      this->outChannel_ = this->outDimValues_[i][3];
+      this->outHeight_ = this->outDimValues_[i][1];
+      this->outWidth_ = this->outDimValues_[i][2];
+    }
+  }
+}
+
+// load model and get function
+template<typename Dtype, template <typename> class Qtype>
+void OffRunner<Dtype, Qtype>::loadOfflinemodel(const string& offlinemodel) {
+  LOG(INFO) << "load file: " << offlinemodel.c_str();
+  cnrtLoadModel(&model_, offlinemodel.c_str());
+  int parallel;
+  cnrtQueryModelParallelism(model_, &parallel);
+
+  CHECK_LE(FLAGS_apiversion, 2) << "The version number should be 1 or 2";
+  CHECK_GE(FLAGS_apiversion, 1) << "The version number should be 1 or 2";
+  const string name = "subnet0";
+  cnrtCreateFunction(&function_);
+  cnrtExtractFunction(&function_, model_, name.c_str());
 }
 
 template<typename Dtype, template <typename> class Qtype>
 void OffRunner<Dtype, Qtype>::runParallel() {
-  setDeviceId(this->deviceId_);
-  int channel = this->threadId_ / this->deviceSize_ % 4;
-  cnrtSetCurrentChannel((cnrtChannelType_t)channel);
-  CHECK(cnrtCreateQueue(&queue_) == CNRT_RET_SUCCESS)
-        << "CNRT create queue error, thread_id " << this->threadId_;
-  // initialize function memory
-  cnrtInitFuncParam_t initFuncParam;
-  bool muta = false;
-  unsigned int affinity = 0x01;
-  int dp = this->dataParallel_;
-  initFuncParam.muta = &muta;
-  initFuncParam.affinity = &affinity;
-  initFuncParam.data_parallelism = &dp;
-  initFuncParam.end = CNRT_PARAM_END;
-  cnrtInitFunctionMemory_V2(function_, &initFuncParam);
-  cnrtNotifier_t notifierBeginning, notifierEnd;
-  cnrtCreateNotifier(&notifierBeginning);
-  cnrtCreateNotifier(&notifierEnd);
-  float eventInterval;
-
-  while (true) {
-    Dtype* mluInData = this->popValidInputData();
-    if ( mluInData == nullptr ) break;  // no more images
-
-    Dtype* mluOutData = this->popFreeOutputData();
-    void* param[this->inBlobNum_ + this->outBlobNum_];
-    for (int i = 0; i < this->inBlobNum_; i++) {
-      param[i] = mluInData[i];
-    }
-    for (int i = 0; i < this->outBlobNum_; i++) {
-      param[this->inBlobNum_ + i] = mluOutData[i];
-    }
-    cnrtDim3_t dim = {1, 1, 1};
-    cnrtInvokeFuncParam_t invokeFuncParam;
-    invokeFuncParam.data_parallelism = &dp;
-    invokeFuncParam.affinity = &affinity;
-    invokeFuncParam.end = CNRT_PARAM_END;
-#if defined(CROSS_COMPILE) || defined(CROSS_COMPILE_ARM64)
-    struct timeval tpend, tpstart;
-    gettimeofday(&tpstart, NULL);
-#endif
-    cnrtPlaceNotifier(notifierBeginning, queue_);
-    CNRT_CHECK(cnrtInvokeFunction_V2(function_, dim, param, (cnrtFunctionType_t)0,
-        queue_, &invokeFuncParam));
-    cnrtPlaceNotifier(notifierEnd, queue_);
-#if defined(CROSS_COMPILE) || defined(CROSS_COMPILE_ARM64)
-    gettimeofday(&tpend, NULL);
-#endif
-    if (cnrtSyncQueue(queue_) == CNRT_RET_SUCCESS) {
-      cnrtNotifierDuration(notifierBeginning, notifierEnd, &eventInterval);
-#if defined(CROSS_COMPILE) || defined(CROSS_COMPILE_ARM64)
-      eventInterval = 1000000 * (tpend.tv_sec - tpstart.tv_sec) +
-          tpend.tv_usec - tpstart.tv_usec;
-#endif
-      this->runTime_ += eventInterval;
-      printfMluTime(eventInterval);
-    } else {
-      LOG(ERROR) << " SyncQueue error";
-    }
-
-    this->pushValidOutputData(mluOutData);
-    this->pushFreeInputData(mluInData);
-  }
-
-  cnrtDestroyNotifier(&notifierBeginning);
-  cnrtDestroyNotifier(&notifierEnd);
-  this->pushValidOutputData(static_cast<Dtype*>(nullptr));  // tell postprocessor to exit
+  runnerStrategy_->runParallel(this);
 }
 
 template<typename Dtype, template <typename> class Qtype>
 void OffRunner<Dtype, Qtype>::runSerial() {
   if (!this->initSerialMode) {
     CHECK(cnrtCreateQueue(&queue_) == CNRT_RET_SUCCESS) << "CNRT create queue error";
-
-    // initliaz function memory
-    cnrtInitFuncParam_t initFuncParam;
-    bool muta = false;
-    unsigned int affinity = 0x01;
-    int dp = 1;
-    initFuncParam.muta = &muta;
-    initFuncParam.affinity = &affinity;
-    initFuncParam.data_parallelism = &dp;
-    initFuncParam.end = CNRT_PARAM_END;
-    cnrtInitFunctionMemory_V2(function_, &initFuncParam);
+    if (cnrtCreateRuntimeContext(&this->rt_ctx_, function(), nullptr) != CNRT_RET_SUCCESS) {
+      LOG(FATAL)<< "Failed to create runtime context";
+    }
+    cnrtSetRuntimeContextDeviceId(this->rt_ctx_, this->deviceId_);
+    cnrtInitRuntimeContext(this->rt_ctx_, NULL);
     this->initSerialMode = true;
   }
 
@@ -258,31 +195,12 @@ void OffRunner<Dtype, Qtype>::runSerial() {
   for (int i = 0; i < this->outBlobNum_; i++) {
     param[this->inBlobNum_ + i] = mluOutData[i];
   }
-  unsigned int affinity = 0x01;
-  int dp = 1;
-  cnrtDim3_t dim = {1, 1, 1};
-  cnrtInvokeFuncParam_t invokeFuncParam;
-  invokeFuncParam.data_parallelism = &dp;
-  invokeFuncParam.affinity = &affinity;
-  invokeFuncParam.end = CNRT_PARAM_END;
 
-#if defined(CROSS_COMPILE) || defined(CROSS_COMPILE_ARM64)
-  struct timeval tpend, tpstart;
-  gettimeofday(&tpstart, NULL);
-#endif
   cnrtPlaceNotifier(notifierBeginning, queue_);
-  CNRT_CHECK(cnrtInvokeFunction_V2(function_, dim, param, (cnrtFunctionType_t)0,
-      queue_, &invokeFuncParam));
+  CNRT_CHECK(cnrtInvokeRuntimeContext(this->rt_ctx_, param, queue_, nullptr));
   cnrtPlaceNotifier(notifierEnd, queue_);
-#if defined(CROSS_COMPILE) || defined(CROSS_COMPILE_ARM64)
-  gettimeofday(&tpend, NULL);
-#endif
   if (cnrtSyncQueue(queue_) == CNRT_RET_SUCCESS) {
     cnrtNotifierDuration(notifierBeginning, notifierEnd, &eventInterval);
-#if defined(CROSS_COMPILE) || defined(CROSS_COMPILE_ARM64)
-    eventInterval = 1000000 * (tpend.tv_sec - tpstart.tv_sec) +
-        tpend.tv_usec - tpstart.tv_usec;
-#endif
     this->runTime_ += eventInterval;
     printfMluTime(eventInterval);
   } else {

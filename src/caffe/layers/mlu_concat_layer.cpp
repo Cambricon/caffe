@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -29,7 +29,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #ifdef USE_MLU
 #include <vector>
-
 #include "caffe/layers/mlu_concat_layer.hpp"
 #include "caffe/util/math_functions.hpp"
 
@@ -45,6 +44,9 @@ template <typename Dtype>
 void MLUConcatLayer<Dtype>::Reshape_tensor(const vector<Blob<Dtype>*>& bottom,
                                            const vector<Blob<Dtype>*>& top) {
   ConcatLayer<Dtype>::Reshape(bottom, top);
+  BaseDataType cpu_dtype = sizeof(Dtype) == 4 ? DT_FLOAT32 : DT_DOUBLE;
+  BaseDataType mlu_dtype = bottom[0]->mlu_type();
+  top[0]->Reshape(top[0]->shape(), cpu_dtype, mlu_dtype, CNML_TENSOR);
 }
 
 template <typename Dtype>
@@ -57,15 +59,18 @@ void MLUConcatLayer<Dtype>::MLUCreateOpBindData(
                                       top[0]->mlu_tensor()));
     return;
   }
-  cnmlConcatMode_t concatModes[4] {cnmlConcatMode_t::CNML_CONCAT_BATCH,
-                                cnmlConcatMode_t::CNML_CONCAT_FEAT,
-                                cnmlConcatMode_t::CNML_CONCAT_HIGHT,
-                                cnmlConcatMode_t::CNML_CONCAT_WIDTH};
-  int axis = this->concat_axis_;
-  MLU_CHECK(cnmlCreateConcatOpParam(&concat_param_ptr_,
-                                 bottom.size(),
-                                 top.size(),
-                                 concatModes[axis]));
+
+  /* adapte axis order NCHW to NHWC */
+  int axis;
+  if (this->concat_axis_ == 0) {
+    axis = 0;
+  } else if (this->concat_axis_ == 2) {
+    axis = 1;
+  } else if (this->concat_axis_ == 3) {
+    axis = 2;
+  } else {
+    axis = 3;
+  }
   int kBottomSize = bottom.size();
   cnmlTensor_t mlutensor_inputs[kBottomSize];
   for (int i = 0; i < bottom.size(); i++)
@@ -76,21 +81,16 @@ void MLUConcatLayer<Dtype>::MLUCreateOpBindData(
   for (int i = 0; i < top.size(); i++)
     mlutensor_outputs[i] = top[i]->mlu_tensor();
 
-  MLU_CHECK(cnmlCreateConcatOp(&concat_op_ptr_,
-                              concat_param_ptr_,
-                              mlutensor_inputs,
-                              kBottomSize,
-                              mlutensor_outputs,
-                              kTopSize));
+  MLU_CHECK(cnmlCreateNdConcatOp(&concat_op_ptr_,
+                                 axis,
+                                 mlutensor_inputs,
+                                 kBottomSize,
+                                 mlutensor_outputs,
+                                 kTopSize));
 }
 
 template <typename Dtype>
 void MLUConcatLayer<Dtype>::MLUDestroyOp() {
-  if (concat_param_ptr_ != nullptr) {
-    MLU_CHECK(cnmlDestroyConcatOpParam(&concat_param_ptr_));
-    concat_param_ptr_ = nullptr;
-  }
-
   if (concat_op_ptr_ != nullptr) {
     MLU_CHECK(cnmlDestroyBaseOp(&concat_op_ptr_));
     concat_op_ptr_ = nullptr;

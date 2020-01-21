@@ -2,7 +2,7 @@
 All modification made by Cambricon Corporation: © 2018--2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -40,10 +40,9 @@ void MLUPriorBoxLayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& bottom,
   PriorBoxLayer<Dtype>::LayerSetUp(bottom, top);
 }
 
-
 template <typename Dtype>
 void MLUPriorBoxLayer<Dtype>::Reshape_tensor(const vector<Blob<Dtype>*>& bottom,
-                                            const vector<Blob<Dtype>*>& top) {
+                                             const vector<Blob<Dtype>*>& top) {
   const int layer_width = bottom[0]->width();
   const int layer_height = bottom[0]->height();
   vector<int> top_shape(3, 1);
@@ -57,13 +56,14 @@ void MLUPriorBoxLayer<Dtype>::Reshape_tensor(const vector<Blob<Dtype>*>& bottom,
   CHECK_GT(top_shape[2], 0);
   // top[0]->Reshape(top_shape);
   BaseDataType cpu_dtype = sizeof(Dtype) == 4 ? DT_FLOAT32 : DT_DOUBLE;
+  BaseDataType mlu_dtype = bottom[0]->mlu_type();
   top[0]->Reshape(top_shape,
                   cpu_dtype,
-                  DT_FLOAT16,
+                  mlu_dtype,
                   CNML_TENSOR);
   priorbox_blob_.Reshape(top_shape,
                   cpu_dtype,
-                  DT_FLOAT16,
+                  mlu_dtype,
                   CNML_CONST);
 }
 
@@ -200,20 +200,20 @@ void MLUPriorBoxLayer<Dtype>::MLUCreateOpBindData(
     }
   }
   // priorbox const tensor
-  cnmlBindConstData(priorbox_blob_.mlu_tensor(),
-                    priorbox_blob_.cpu_tensor(),
-                    (void*)priorbox_blob_.cpu_data());  //NOLINT
+  MLU_CHECK(cnmlBindConstData_V2(priorbox_blob_.mlu_tensor(),
+                                 reinterpret_cast<void*>(priorbox_blob_.sync_data()),
+                                 false));
 
   MLU_CHECK(cnmlCreateDeviceMemcpyOp(&device_copy_op_ptr_,
-      priorbox_blob_.mlu_tensor(),
-      top[0]->mlu_tensor()));
+                                      priorbox_blob_.mlu_tensor(),
+                                      top[0]->mlu_tensor()));
 }
 
 template <typename Dtype>
 void MLUPriorBoxLayer<Dtype>::MLUCompileOp() {
   MLU_CHECK(cnmlCompileBaseOp(device_copy_op_ptr_,
                               Caffe::rt_core(),
-                              Caffe::model_parallel()));
+                              Caffe::core_number()));
 }
 
 // Attention: Prior should not be fused alone
@@ -232,15 +232,15 @@ MLUPriorBoxLayer<Dtype>::~MLUPriorBoxLayer() {
 
 template <typename Dtype>
 void MLUPriorBoxLayer<Dtype>::Forward_mlu(const vector<Blob<Dtype>*>& bottom,
-                                         const vector<Blob<Dtype>*>& top) {
-  MLU_CHECK(cnmlComputeDeviceMemcpyOpForward_V3(
-    device_copy_op_ptr_,
-    nullptr,
-    top[0]->mutable_mlu_data(),
-    Caffe::forward_param(),
-    Caffe::queue()));
+                                          const vector<Blob<Dtype>*>& top) {
+  MLU_CHECK(cnmlComputeDeviceMemcpyOpForward_V3(device_copy_op_ptr_,
+                                                nullptr,
+                                                top[0]->mutable_mlu_data(),
+                                                Caffe::forward_param(),
+                                                Caffe::queue()));
 }
 
 INSTANTIATE_CLASS(MLUPriorBoxLayer);
+
 }  // namespace caffe
 #endif  // USE_MLU

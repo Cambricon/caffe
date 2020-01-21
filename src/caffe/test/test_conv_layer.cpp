@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -32,23 +32,25 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <vector>
 
 #include "gtest/gtest.h"
-
 #include "caffe/blob.hpp"
 #include "caffe/common.hpp"
 #include "caffe/filler.hpp"
 #include "caffe/layers/conv_layer.hpp"
-
+/*#include "caffe/mlu/util.hpp"*/
+#include "caffe/layers/mlu_conv_layer.hpp"
 #ifdef USE_CUDNN
 #include "caffe/layers/cudnn_conv_layer.hpp"
 #endif
 
 #ifdef USE_MLU
-#include "caffe/layers/mlu_conv_layer.hpp"
+#include "caffe/mlu/reshape_helper.hpp"
+#include "caffe/mlu/spliter.hpp"
+#include "caffe/mlu/subnet.hpp"
+
 #endif
 
 #include "caffe/test/test_caffe_main.hpp"
 #include "caffe/test/test_gradient_check_util.hpp"
-
 namespace caffe {
 // Reference convolution for checking results:
 // accumulate through explicit loops over input, output, and filters.
@@ -211,7 +213,6 @@ class ConvolutionLayerTest : public MultiDeviceTest<TypeParam> {
     blob_bottom_vec_.push_back(blob_bottom_);
     blob_top_vec_.push_back(blob_top_);
   }
-
   virtual ~ConvolutionLayerTest() {
     delete blob_bottom_;
     delete blob_bottom_2_;
@@ -1021,13 +1022,12 @@ class MLUConvolutionLayerTest : public MLUDeviceTest<TypeParam> {
     // fill the values
     FillerParameter filler_param;
     filler_param.set_value(1.);
-    GaussianFiller<Dtype> filler(filler_param);
+    ConstantFiller<Dtype> filler(filler_param);
     filler.Fill(this->blob_bottom_);
     filler.Fill(this->blob_bottom_2_);
     blob_bottom_vec_.push_back(blob_bottom_);
     blob_top_vec_.push_back(blob_top_);
   }
-
   virtual ~MLUConvolutionLayerTest() {
     delete blob_bottom_;
     delete blob_bottom_2_;
@@ -1091,7 +1091,7 @@ TYPED_TEST(MLUConvolutionLayerTest, TestSetup) {
   OUTPUT("bottom2", this->blob_bottom_2_->shape_string().c_str());
 }
 
-TYPED_TEST(MLUConvolutionLayerTest, TestSimpleConvolution) {
+TYPED_TEST(MLUConvolutionLayerTest, TestSimpleConvolutionInt8) {
   typedef typename TypeParam::Dtype Dtype;
   LayerParameter layer_param;
   ConvolutionParameter* convolution_param =
@@ -1099,27 +1099,37 @@ TYPED_TEST(MLUConvolutionLayerTest, TestSimpleConvolution) {
   convolution_param->add_kernel_size(3);
   convolution_param->add_stride(2);
   convolution_param->set_num_output(4);
-  convolution_param->mutable_weight_filler()->set_type("gaussian");
+  convolution_param->mutable_weight_filler()->set_type("constant");
+  convolution_param->mutable_weight_filler()->set_value(10);
   convolution_param->mutable_bias_filler()->set_type("constant");
-  convolution_param->mutable_bias_filler()->set_value(0.1);
+  convolution_param->mutable_bias_filler()->set_value(1);
+  BlobDataType blob_dtype;  // set position
+  blob_dtype = get_quantized_info(*this->blob_bottom_, layer_param, "common", DT_INT8);
+  layer_param.add_bottom_mlu_dtype()->CopyFrom(blob_dtype);
+  int position = -3;  // set weight position
+  int scale = 1.5875;
+  BlobDataType blobs_dtype;
+  blobs_dtype.set_type(DT_INT8);
+  blobs_dtype.add_position(position);
+  blobs_dtype.add_scale(scale);
+  layer_param.add_blobs_dtype()->CopyFrom(blobs_dtype);
   shared_ptr<Layer<Dtype> > layer(new MLUConvolutionLayer<Dtype>(layer_param));
   layer->SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
   layer->Reshape_dispatch(this->blob_bottom_vec_, this->blob_top_vec_);
   layer->Forward(this->blob_bottom_vec_, this->blob_top_vec_);
   // Check against reference convolution.
   const Dtype* top_data;
+  top_data = this->blob_top_->cpu_data();
   const Dtype* ref_top_data;
   caffe_conv(this->blob_bottom_, convolution_param, layer->blobs(),
              this->MakeReferenceTop(this->blob_top_));
-  top_data = this->blob_top_->cpu_data();
   ref_top_data = this->ref_blob_top_->cpu_data();
   for (int i = 0; i < this->blob_top_->count(); ++i) {
-    EXPECT_NEAR(top_data[i], ref_top_data[i], 2e-2);
+    EXPECT_NEAR(top_data[i], ref_top_data[i], 0.26);
   }
   OUTPUT("bottom1", this->blob_bottom_->shape_string().c_str());
   EVENT_TIME(layer->get_event_time());
 }
-
 TYPED_TEST(MLUConvolutionLayerTest, TestSimpleConvolutionGroup) {
   typedef typename TypeParam::Dtype Dtype;
   LayerParameter layer_param;
@@ -1129,7 +1139,8 @@ TYPED_TEST(MLUConvolutionLayerTest, TestSimpleConvolutionGroup) {
   convolution_param->add_stride(2);
   convolution_param->set_num_output(3);
   convolution_param->set_group(3);
-  convolution_param->mutable_weight_filler()->set_type("gaussian");
+  convolution_param->mutable_weight_filler()->set_type("contant");
+  convolution_param->mutable_weight_filler()->set_value(10);
   convolution_param->mutable_bias_filler()->set_type("constant");
   convolution_param->mutable_bias_filler()->set_value(1);
   shared_ptr<Layer<Dtype> > layer(new MLUConvolutionLayer<Dtype>(layer_param));
@@ -1138,13 +1149,13 @@ TYPED_TEST(MLUConvolutionLayerTest, TestSimpleConvolutionGroup) {
   layer->Forward(this->blob_bottom_vec_, this->blob_top_vec_);
   const Dtype* top_data;
   top_data = this->blob_top_->cpu_data();
-
   for (auto blob : layer->blobs()) {
     auto shape = blob->shape();
-    std::swap(shape[0], shape[1]);
+    if (shape.size() > 1) {
+      std::swap(shape[0], shape[1]);
+    }
     blob->Reshape(shape);
   }
-
   const Dtype* ref_top_data;
   caffe_conv(this->blob_bottom_, convolution_param, layer->blobs(),
              this->MakeReferenceTop(this->blob_top_));
@@ -1162,7 +1173,7 @@ TYPED_TEST(MLUConvolutionLayerTest, TestSimpleConvolutionGroup) {
   EVENT_TIME(layer->get_event_time());
 }
 
-TYPED_TEST(MLUConvolutionLayerTest, Test1x1Convolution) {
+TYPED_TEST(MLUConvolutionLayerTest, Test1x1ConvolutionInt8) {
   typedef typename TypeParam::Dtype Dtype;
   LayerParameter layer_param;
   ConvolutionParameter* convolution_param =
@@ -1170,9 +1181,20 @@ TYPED_TEST(MLUConvolutionLayerTest, Test1x1Convolution) {
   convolution_param->add_kernel_size(1);
   convolution_param->add_stride(1);
   convolution_param->set_num_output(4);
-  convolution_param->mutable_weight_filler()->set_type("gaussian");
+  convolution_param->mutable_weight_filler()->set_type("constant");
+  convolution_param->mutable_weight_filler()->set_value(10);
   convolution_param->mutable_bias_filler()->set_type("constant");
   convolution_param->mutable_bias_filler()->set_value(0.1);
+  BlobDataType blob_dtype;  // set position
+  blob_dtype = get_quantized_info(*this->blob_bottom_, layer_param, "common", DT_INT8);
+  layer_param.add_bottom_mlu_dtype()->CopyFrom(blob_dtype);
+  int position = -3;  // set weight position
+  int scale = 1.5875;
+  BlobDataType blobs_dtype;
+  blobs_dtype.set_type(DT_INT8);
+  blobs_dtype.add_position(position);
+  blobs_dtype.add_scale(scale);
+  layer_param.add_blobs_dtype()->CopyFrom(blobs_dtype);
   shared_ptr<Layer<Dtype> > layer(new MLUConvolutionLayer<Dtype>(layer_param));
   layer->SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
   layer->Reshape_dispatch(this->blob_bottom_vec_, this->blob_top_vec_);
@@ -1186,7 +1208,7 @@ TYPED_TEST(MLUConvolutionLayerTest, Test1x1Convolution) {
   ref_top_data = this->ref_blob_top_->cpu_data();
   float err_sum = 0, sum = 0;
   for (int i = 0; i < this->blob_top_->count(); ++i) {
-    EXPECT_NEAR(top_data[i], ref_top_data[i], 2e-2);
+    EXPECT_NEAR(top_data[i], ref_top_data[i], 2e-1);
     err_sum += std::abs(top_data[i] - ref_top_data[i]);
     sum += std::abs(ref_top_data[i]);
   }
@@ -1211,7 +1233,7 @@ class MFUSConvolutionLayerTest : public MFUSDeviceTest<TypeParam> {
     // fill the values
     FillerParameter filler_param;
     filler_param.set_value(1.);
-    GaussianFiller<Dtype> filler(filler_param);
+    ConstantFiller<Dtype> filler(filler_param);
     filler.Fill(this->blob_bottom_);
     filler.Fill(this->blob_bottom_2_);
     blob_bottom_vec_.push_back(blob_bottom_);
@@ -1280,7 +1302,7 @@ TYPED_TEST(MFUSConvolutionLayerTest, TestSetup) {
   OUTPUT("bottom1", this->blob_bottom_->shape_string().c_str());
 }
 
-TYPED_TEST(MFUSConvolutionLayerTest, TestSimpleConvolution) {
+TYPED_TEST(MFUSConvolutionLayerTest, TestSimpleConvolutionInt8) {
   typedef typename TypeParam::Dtype Dtype;
   LayerParameter layer_param;
   ConvolutionParameter* convolution_param =
@@ -1288,12 +1310,22 @@ TYPED_TEST(MFUSConvolutionLayerTest, TestSimpleConvolution) {
   convolution_param->add_kernel_size(3);
   convolution_param->add_stride(2);
   convolution_param->set_num_output(4);
-  convolution_param->mutable_weight_filler()->set_type("gaussian");
+  convolution_param->mutable_weight_filler()->set_type("constant");
+  convolution_param->mutable_weight_filler()->set_value(10);
   convolution_param->mutable_bias_filler()->set_type("constant");
   convolution_param->mutable_bias_filler()->set_value(0.1);
+  BlobDataType blob_dtype;  // set position
+  blob_dtype = get_quantized_info(*this->blob_bottom_, layer_param, "common", DT_INT8);
+  layer_param.add_bottom_mlu_dtype()->CopyFrom(blob_dtype);
+  int position = -3;  // set weight position
+  int scale = 1.5875;
+  BlobDataType blobs_dtype;
+  blobs_dtype.set_type(DT_INT8);
+  blobs_dtype.add_position(position);
+  blobs_dtype.add_scale(scale);
+  layer_param.add_blobs_dtype()->CopyFrom(blobs_dtype);
   shared_ptr<Layer<Dtype> > layer(new MLUConvolutionLayer<Dtype>(layer_param));
   layer->SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
-
   MFusion<Dtype> fuser;
   fuser.reset();
   fuser.addInputs(this->blob_bottom_vec_);
@@ -1310,7 +1342,7 @@ TYPED_TEST(MFUSConvolutionLayerTest, TestSimpleConvolution) {
   top_data = this->blob_top_->cpu_data();
   ref_top_data = this->ref_blob_top_->cpu_data();
   for (int i = 0; i < this->blob_top_->count(); ++i) {
-    EXPECT_NEAR(top_data[i], ref_top_data[i], 2e-2);
+    EXPECT_NEAR(top_data[i], ref_top_data[i], 0.36);
   }
   OUTPUT("bottom1", this->blob_bottom_->shape_string().c_str());
   EVENT_TIME(fuser.get_event_time());
@@ -1344,7 +1376,9 @@ TYPED_TEST(MFUSConvolutionLayerTest, TestSimpleConvolutionGroup) {
 
   for (auto blob : layer->blobs()) {
     auto shape = blob->shape();
-    std::swap(shape[0], shape[1]);
+    if (shape.size() > 1) {
+      std::swap(shape[0], shape[1]);
+    }
     blob->Reshape(shape);
   }
 
@@ -1364,7 +1398,7 @@ TYPED_TEST(MFUSConvolutionLayerTest, TestSimpleConvolutionGroup) {
   EVENT_TIME(fuser.get_event_time());
 }
 
-TYPED_TEST(MFUSConvolutionLayerTest, Test1x1Convolution) {
+TYPED_TEST(MFUSConvolutionLayerTest, Test1x1ConvolutionInt8) {
   typedef typename TypeParam::Dtype Dtype;
   LayerParameter layer_param;
   ConvolutionParameter* convolution_param =
@@ -1372,9 +1406,20 @@ TYPED_TEST(MFUSConvolutionLayerTest, Test1x1Convolution) {
   convolution_param->add_kernel_size(1);
   convolution_param->add_stride(1);
   convolution_param->set_num_output(4);
-  convolution_param->mutable_weight_filler()->set_type("gaussian");
+  convolution_param->mutable_weight_filler()->set_type("constant");
+  convolution_param->mutable_weight_filler()->set_value(10);
   convolution_param->mutable_bias_filler()->set_type("constant");
   convolution_param->mutable_bias_filler()->set_value(0.1);
+  BlobDataType blob_dtype;  // set position
+  blob_dtype = get_quantized_info(*this->blob_bottom_, layer_param, "common", DT_INT8);
+  layer_param.add_bottom_mlu_dtype()->CopyFrom(blob_dtype);
+  int position = -3;  // set weight position
+  int scale = 1.5875;
+  BlobDataType blobs_dtype;
+  blobs_dtype.set_type(DT_INT8);
+  blobs_dtype.add_position(position);
+  blobs_dtype.add_scale(scale);
+  layer_param.add_blobs_dtype()->CopyFrom(blobs_dtype);
   shared_ptr<Layer<Dtype> > layer(new MLUConvolutionLayer<Dtype>(layer_param));
 
   MFusion<Dtype> fuser;
@@ -1395,7 +1440,7 @@ TYPED_TEST(MFUSConvolutionLayerTest, Test1x1Convolution) {
   ref_top_data = this->ref_blob_top_->cpu_data();
   float err_sum = 0, sum = 0;
   for (int i = 0; i < this->blob_top_->count(); ++i) {
-    EXPECT_NEAR(top_data[i], ref_top_data[i], 2e-2);
+    EXPECT_NEAR(top_data[i], ref_top_data[i], 2e-1);
     sum += std::abs(ref_top_data[i]);
   }
   std::ostringstream stream;
@@ -1404,6 +1449,5 @@ TYPED_TEST(MFUSConvolutionLayerTest, Test1x1Convolution) {
   ERR_RATE(err_sum/sum);
   EVENT_TIME(fuser.get_event_time());
 }
-
 #endif
 }  // namespace caffe

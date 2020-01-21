@@ -55,6 +55,7 @@ class MLUYUVtoRGBLayerTest : public MLUDeviceTest<TypeParam> {
   vector<Blob<Dtype>*> blob_bottom_vec_;
   vector<Blob<Dtype>*> blob_top_vec_;
   Blob<Dtype>* const blob_bottom_;
+  Blob<Dtype>* const blob_bottom_1_;
   Blob<Dtype>* const blob_top_;
   // blob set and compare.
   bool data_generated_;
@@ -70,13 +71,16 @@ class MLUYUVtoRGBLayerTest : public MLUDeviceTest<TypeParam> {
       : Height(4), Width(4), Nums(1),  // Set size here
                       // H & W is JPG size, must be even, n > 0
         blob_bottom_(new Blob<Dtype>(this->Nums, 1,
-                                     this->Height / 2 * 3, this->Width)),
+                                     this->Height, this->Width)),
+        blob_bottom_1_(new Blob<Dtype>(this->Nums, 1,
+                                       this->Height/2, this->Width)),
         blob_top_(new Blob<Dtype>()), data_generated_(false),
         yuv420spNV21_(nullptr), yuv420spNV12_(nullptr), random_jpg_(nullptr),
         result_jpg_(nullptr) {}
 
   virtual ~MLUYUVtoRGBLayerTest() {
     delete blob_bottom_;
+    delete blob_bottom_1_;
     delete blob_top_;
     clear();
   }
@@ -148,7 +152,6 @@ class MLUYUVtoRGBLayerTest : public MLUDeviceTest<TypeParam> {
         yuv420spNV21_[coordinate + 1] = static_cast<TType>(Cr);
       }
     // End 4 for
-
       // Calc rgb back from YUV.
       for (int h_ = 0; h_ < Height; h_ ++)
         for (int w_ = 0; w_ < Width; w_ ++) {
@@ -172,14 +175,19 @@ class MLUYUVtoRGBLayerTest : public MLUDeviceTest<TypeParam> {
         }
     }
   //  End of datagenerator
-
   void LayerBottomSet(intype shape) {
     for (int n_ = 0; n_ < Nums; n_++)
-      for (int cood = 0; cood < Height * Width / 2 * 3; cood++)
-        reinterpret_cast<TType*>(
-            blob_bottom_
-                ->mutable_cpu_data())[n_ * Height * Width / 2 * 3 + cood] =
-            (shape == NV12) ? yuv420spNV12_[cood] : yuv420spNV21_[cood];
+      for (int cood = 0; cood < Height * Width/ 2 * 3; cood++)
+        if (cood < Height * Width) {
+            reinterpret_cast<TType*>(
+                blob_bottom_->mutable_cpu_data())[n_ * Height * Width + cood]
+                =(shape == NV12) ? yuv420spNV12_[cood] : yuv420spNV21_[cood];
+        } else {
+            reinterpret_cast<TType*>
+                (blob_bottom_1_->mutable_cpu_data())[n_ * Height * Width / 2
+                + cood - (Height * Width)]
+                = (shape == NV12) ? yuv420spNV12_[cood] : yuv420spNV21_[cood];
+        }
   }
 
   int ResultAt(outtype shape, int coodinate, int channel) {
@@ -206,9 +214,10 @@ class MLUYUVtoRGBLayerTest : public MLUDeviceTest<TypeParam> {
     for (int n_ = 0; n_ < Nums; n_++) {
       for (int c_ = 0; c_ < 4; c_++) {
         for (int cood = 0; cood < Height * Width; cood++) {
-          float Output = static_cast<float>(reinterpret_cast<const TType*>(
-            blob_top_->cpu_data())[(n_ * 4 + c_) * Height * Width + cood]);
-          float RightAns = ResultAt(shape, cood, c_);
+          float Output = static_cast<float>(
+              reinterpret_cast<const TType*>(blob_top_vec_[0]->cpu_data())[(
+              n_ * 4)  * Height * Width + 4 * cood+ c_]);
+          unsigned char RightAns = ResultAt(shape, cood, c_);
           EXPECT_NEAR(Output, RightAns, deviation) << "  Where  N=" << n_
             << " C=" << c_ << " H=" << cood / Width << " W=" << cood % Width;
          }
@@ -226,7 +235,9 @@ class MLUYUVtoRGBLayerTest : public MLUDeviceTest<TypeParam> {
     FillerParameter filler_param;
     GaussianFiller<Dtype> filler(filler_param);
     filler.Fill(this->blob_bottom_);
+    filler.Fill(this->blob_bottom_1_);
     blob_bottom_vec_.push_back(blob_bottom_);
+    blob_bottom_vec_.push_back(blob_bottom_1_);
     blob_top_vec_.push_back(blob_top_);
   }
 
@@ -246,7 +257,9 @@ void TestForwardTtoT(int a, int b) {
   YuvToRgbParameter* yuvtorgb_param = layer_param.mutable_yuvtorgb_param();
   int channels = 1;
   dataGenerator();
-  blob_bottom_->Reshape(Nums, channels, Height * 3 /2, Width);
+  blob_bottom_->Reshape(Nums, channels, Height, Width);
+  blob_bottom_1_->Reshape(Nums, channels, Height / 2, Width);
+  blob_top_->Reshape(Nums, 4, Height, Width);
   LayerBottomSet(inshape);
   if (inshape == NV12)
     yuvtorgb_param->set_input_format(YuvToRgbParameter_InputFormat_YUV420SP_NV12);
@@ -280,7 +293,7 @@ TYPED_TEST(MLUYUVtoRGBLayerTest, TestSetup) {
   layer->SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
   EXPECT_EQ(this->blob_top_->num(), this->blob_bottom_->num());
   EXPECT_EQ(this->blob_top_->channels(), 4);
-  EXPECT_EQ(this->blob_top_->height(), this->blob_bottom_->height() / 3 * 2);
+  EXPECT_EQ(this->blob_top_->height(), this->blob_bottom_->height());
   EXPECT_EQ(this->blob_top_->width(), this->blob_bottom_->width());
 }
 
@@ -319,6 +332,7 @@ class MFUSYUVtoRGBLayerTest : public MFUSDeviceTest<TypeParam> {
   vector<Blob<Dtype>*> blob_bottom_vec_;
   vector<Blob<Dtype>*> blob_top_vec_;
   Blob<Dtype>* const blob_bottom_;
+  Blob<Dtype>* const blob_bottom_1_;
   Blob<Dtype>* const blob_top_;
   // blob set and compare.
   bool data_generated_;
@@ -334,13 +348,15 @@ class MFUSYUVtoRGBLayerTest : public MFUSDeviceTest<TypeParam> {
         : Height(4), Width(4), Nums(1),  // Set size here
                         // H & W is JPG size, must be even, n > 0
           blob_bottom_(new Blob<Dtype>(this->Nums, 1,
-                                       this->Height / 2 * 3, this->Width)),
+                                       this->Height, this->Width)),
+          blob_bottom_1_(new Blob<Dtype>(this->Nums, 1, this->Height/2, this->Width)),
           blob_top_(new Blob<Dtype>()), data_generated_(false),
           yuv420spNV21_(nullptr), yuv420spNV12_(nullptr), random_jpg_(nullptr),
           result_jpg_(nullptr) {}
 
     virtual ~MFUSYUVtoRGBLayerTest() {
       delete blob_bottom_;
+      delete blob_bottom_1_;
       delete blob_top_;
       clear();
     }
@@ -436,14 +452,19 @@ class MFUSYUVtoRGBLayerTest : public MFUSDeviceTest<TypeParam> {
         }
     }
   //  End of datagenerator
-
   void LayerBottomSet(intype shape) {
     for (int n_ = 0; n_ < Nums; n_++)
       for (int cood = 0; cood < Height * Width / 2 * 3; cood++)
-        reinterpret_cast<TType*>(
-            blob_bottom_
-                ->mutable_cpu_data())[n_ * Height * Width / 2 * 3 + cood] =
-            (shape == NV12) ? yuv420spNV12_[cood] : yuv420spNV21_[cood];
+        if (cood < Height * Width) {
+            reinterpret_cast<TType*>(
+            blob_bottom_->mutable_cpu_data())[n_ * Height * Width + cood]
+            = (shape == NV12) ? yuv420spNV12_[cood] : yuv420spNV21_[cood];
+        } else {
+            reinterpret_cast<TType*>(
+            blob_bottom_1_->mutable_cpu_data())[n_ * Height * Width / 2
+            + cood - (Height * Width)]
+            = (shape == NV12) ? yuv420spNV12_[cood] : yuv420spNV21_[cood];
+       }
   }
 
   int ResultAt(outtype shape, int coodinate, int channel) {
@@ -470,8 +491,8 @@ class MFUSYUVtoRGBLayerTest : public MFUSDeviceTest<TypeParam> {
     for (int n_ = 0; n_ < Nums; n_++) {
       for (int c_ = 0; c_ < 4; c_++) {
         for (int cood = 0; cood < Height * Width; cood++) {
-          float Output = static_cast<float>(reinterpret_cast<const TType*>(
-            blob_top_->cpu_data())[(n_ * 4 + c_) * Height * Width + cood]);
+            float Output = static_cast<float>(reinterpret_cast<const TType*>(
+            blob_top_->cpu_data())[(n_ * 4) * Height * Width + cood * 4 + c_]);
           float RightAns = ResultAt(shape, cood, c_);
           EXPECT_NEAR(Output, RightAns, deviation) << "  Where  N=" << n_
             << " C=" << c_ << " H=" << cood / Width << " W=" << cood % Width;
@@ -490,7 +511,9 @@ class MFUSYUVtoRGBLayerTest : public MFUSDeviceTest<TypeParam> {
     FillerParameter filler_param;
     GaussianFiller<Dtype> filler(filler_param);
     filler.Fill(this->blob_bottom_);
+    filler.Fill(this->blob_bottom_1_);
     blob_bottom_vec_.push_back(blob_bottom_);
+    blob_bottom_vec_.push_back(blob_bottom_1_);
     blob_top_vec_.push_back(blob_top_);
   }
 
@@ -510,7 +533,9 @@ void TestForwardTtoT(int a, int b) {
   YuvToRgbParameter* yuvtorgb_param = layer_param.mutable_yuvtorgb_param();
   int channels = 1;
   dataGenerator();
-  blob_bottom_->Reshape(Nums, channels, Height * 3 /2, Width);
+  blob_bottom_->Reshape(Nums, channels, Height, Width);
+  blob_bottom_1_->Reshape(Nums, channels, Height / 2, Width);
+  blob_top_->Reshape(Nums, 4, Height, Width);
   LayerBottomSet(inshape);
   if (inshape == NV12)
     yuvtorgb_param->set_input_format(YuvToRgbParameter_InputFormat_YUV420SP_NV12);
@@ -552,7 +577,7 @@ TYPED_TEST(MFUSYUVtoRGBLayerTest, TestSetup) {
   layer->SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
   EXPECT_EQ(this->blob_top_->num(), this->blob_bottom_->num());
   EXPECT_EQ(this->blob_top_->channels(), 4);
-  EXPECT_EQ(this->blob_top_->height(), this->blob_bottom_->height() / 3 * 2);
+  EXPECT_EQ(this->blob_top_->height(), this->blob_bottom_->height());
   EXPECT_EQ(this->blob_top_->width(), this->blob_bottom_->width());
 }
 

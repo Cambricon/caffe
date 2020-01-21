@@ -2,7 +2,7 @@
 All modification made by Cambricon Corporation: © 2018--2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -114,6 +114,233 @@ void ParseNetSsdConfParameter(const NetParameter& param,
   }
 }
 
+void UpdateConvWeights(LayerParameter* const layer,
+    const vector<vector<float>>& alphabeta) {
+  vector<int> shape;
+  layer->mutable_convolution_param()->clear_bias_term();
+  caffe::BlobProto* proto = layer->mutable_blobs(0);
+  if (proto->has_num() || proto->has_channels() || proto->has_height() ||
+      proto->has_width()) {
+    // Using deprecated 4D Blob dimensions --
+    // shape is (num, channels, height, width).
+    shape.resize(4);
+    shape[0] = proto->num();
+    shape[1] = proto->channels();
+    shape[2] = proto->height();
+    shape[3] = proto->width();
+  } else {
+    shape.resize(proto->shape().dim_size());
+    for (int i = 0; i < proto->shape().dim_size(); ++i) {
+      shape[i] = proto->shape().dim(i);
+    }
+  }
+  CHECK_EQ(shape[0], alphabeta[0].size()) << "Output channels should be equal!";
+  int inner_size = 1;
+  for (int i = 1; i < shape.size(); i++) {
+    inner_size *= shape[i];
+  }
+
+  for (int i = 0; i < shape[0]; i++) {
+    for (int j = 0; j < inner_size; j++) {
+      if (proto->double_data_size() > 0) {
+        proto->set_double_data(
+            i * inner_size + j,
+            proto->double_data(i * inner_size + j) * alphabeta[0][i]);
+      } else {
+        proto->set_data(
+            i * inner_size + j,
+            proto->data(i * inner_size + j) * alphabeta[0][i]);
+      }
+    }
+  }
+
+  if (layer->blobs_size() == 1) {
+    proto = layer->add_blobs();
+    for (int i = 0; i < shape[0]; i++) {
+      if (layer->blobs(0).data_size())
+        proto->add_data(0);
+      else
+        proto->add_double_data(0);
+    }
+  }
+
+  proto = layer->mutable_blobs(1);
+  for (int i = 0; i < shape[0]; i++) {
+    if (proto->double_data_size() > 0) {
+      if (alphabeta[0][i] != 0) {
+        proto->set_double_data(
+            i, proto->double_data(i) * (alphabeta[0][i]) + alphabeta[1][i]);
+      }
+    } else {
+      if (alphabeta[0][i] != 0) {
+        proto->set_data(
+            i, proto->data(i) * (alphabeta[0][i]) + alphabeta[1][i]);
+      }
+    }
+  }
+
+  if (!proto->has_shape())
+    proto->mutable_shape()->add_dim(shape[0]);
+}
+
+vector<vector<float> > GetBnAlphaBeta(const LayerParameter& layer) {
+  vector<vector<float> > alphabeta(2);
+  alphabeta[0].resize(layer.blobs(0).data_size(), 1);
+  alphabeta[1].resize(layer.blobs(0).data_size(), 0);
+  float scale = layer.blobs(2).data(0) == 0 ? 0 : 1 / layer.blobs(2).data(0);
+  for (int i = 0; i < alphabeta[0].size(); i++) {
+    // NOTE: we must regard extremely small number e.g 1.234e-20 as 0
+    // so that MLU calculation will not overflow
+    if (scale != 0 && fabs(layer.blobs(1).data(i)) > 1.0e-10) {
+      alphabeta[0][i] = sqrt(1. / (scale * layer.blobs(1).data(i)));
+    } else {
+      alphabeta[0][i] = 0;
+    }
+  }
+
+  for (int i = 0; i < alphabeta[0].size(); i++) {
+    if (alphabeta[0][i] != 0)
+      alphabeta[1][i] = -layer.blobs(0).data(i) * scale * alphabeta[0][i];
+  }
+
+  if (layer.blobs_size() > 3) {
+    for (int i = 0; i < alphabeta[0].size(); i++) {
+      alphabeta[0][i] *= layer.blobs(3).data(i);
+    }
+    for (int i = 0; i < alphabeta[1].size(); i++) {
+      alphabeta[1][i] += layer.blobs(4).data(i);
+    }
+  }
+
+  return alphabeta;
+}
+
+vector<vector<float> > GetScaleAlphaBeta(const LayerParameter& layer) {
+  vector<vector<float> > alphabeta(2);
+  alphabeta[0].resize(layer.blobs(0).data_size(), 1);
+  alphabeta[1].resize(layer.blobs(0).data_size(), 0);
+  for (int i = 0; i < layer.blobs(0).data_size(); i++) {
+    alphabeta[0][i] = layer.blobs(0).data(i);
+  }
+
+  if (layer.blobs_size() >= 2) {
+    for (int i = 0; i < layer.blobs(1).data_size(); i++) {
+      alphabeta[1][i] = layer.blobs(1).data(i);
+    }
+  }
+  return alphabeta;
+}
+
+void DeleteOptimizedLayers(NetParameter param,
+                           NetParameter* const param_optimized,
+                           const vector<int>& layer_dropped) {
+  param_optimized->clear_layer();
+  for (int i = 0; i < param.layer_size(); i++) {
+    if (!layer_dropped[i]) {
+      caffe::LayerParameter* layer_param = param_optimized->add_layer();
+      layer_param->CopyFrom(param.layer(i));
+    } else {
+      if (param.layer(i).bottom(0) != param.layer(i).top(0)) {
+        for (int j = i + 1; j < param.layer_size(); j++) {
+          for (int k = 0; k < param.layer(j).bottom_size(); k++) {
+            if (param.layer(j).bottom(k) == param.layer(i).top(0)) {
+              param.mutable_layer(j)->set_bottom(
+                  k, param.layer(i).bottom(0));
+              for (int p = 0; p < param.layer(j).top_size(); p++) {
+                if (param.layer(i).top(0) == param.layer(j).top(p)) {
+                  param.mutable_layer(j)->set_top(p,
+                      param.layer(i).bottom(0));
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+/*
+ *    Conv
+ *     |
+ *     Bn
+ *     |
+ *     Bn(two next layer)
+ *    /  \
+ *   Bn  Bn
+ *
+ * should be optimized to
+ *
+ *    Conv
+ *    /  \
+ *   Bn  Bn
+ */
+bool HasMultiNextLayer(const NetParameter& param, int index) {
+  string current_top = param.layer(index).top(0);
+  int cnt = 0;
+  for (int i = index + 1; i < param.layer_size(); i++) {
+    for (int j = 0; j < param.layer(i).bottom_size(); j++) {
+      if (current_top == param.layer(i).bottom(j)) {
+        cnt++;
+        break;
+      }
+    }
+  }
+  return cnt >= 2;
+}
+
+bool IsTargetLayer(const LayerParameter& layer_param) {
+  return layer_param.top_size() < 2 &&
+    layer_param.bottom_size() < 2 &&
+    ((layer_param.type() == "BatchNorm" &&
+      layer_param.batch_norm_param().use_global_stats()) || (
+      layer_param.type() == "Scale" &&
+      layer_param.scale_param().axis() == 1 &&
+      layer_param.scale_param().num_axes() == 1));
+}
+
+// kernel size is 1
+bool IsPointwise(const LayerParameter& layer_param) {
+  for (int i = 0; i < layer_param.convolution_param().kernel_size_size(); i++) {
+    if (layer_param.convolution_param().kernel_size(i) == 1)
+      return true;
+  }
+  return false;
+}
+
+vector<vector<int>> GetConvBnScaleStruct(const NetParameter& param,
+       const NetParameter* param_without_weight) {
+  auto tmp_param = param;
+  if (param_without_weight)
+      UpdateUseGlobalStats(&tmp_param, *param_without_weight);
+  vector<vector<int>> layer_optimized(tmp_param.layer_size());
+  // hack out inplace blobs to make life easier :)
+  HackInplaceBlobs(&tmp_param);
+  for (int i = 0; i < tmp_param.layer_size(); i++) {
+    string blob_next;
+    // Convolution should only have one next layer
+    if ((tmp_param.layer(i).type() == "Convolution" ||
+         tmp_param.layer(i).type() == "ConvolutionDepthwise") &&
+        !HasMultiNextLayer(tmp_param, i) &&
+        !IsPointwise(tmp_param.layer(i))) {
+      blob_next = tmp_param.layer(i).top(0);
+      for (int j = i + 1; j < tmp_param.layer_size(); j++) {
+        if (blob_next == tmp_param.layer(j).bottom(0) &&
+            IsTargetLayer(tmp_param.layer(j))) {
+          layer_optimized[i].push_back(j);
+          blob_next = tmp_param.layer(j).top(0);
+          //  if current layer has two or more next layer
+          //  it's the last layer to optimize
+          //  stop searching
+          if (HasMultiNextLayer(tmp_param, j)) break;
+        } else {
+          break;
+        }
+      }
+    }
+  }
+  return layer_optimized;
+}
 #endif
 
 int NetGetLayerIndexByTopName(const NetParameter& net_param, const string top) {
@@ -126,6 +353,7 @@ int NetGetLayerIndexByTopName(const NetParameter& net_param, const string top) {
 
 bool UpgradeNetAsNeeded(const string& param_file, NetParameter* param) {
   bool success = true;
+
   if (NetNeedsV0ToV1Upgrade(*param)) {
     // NetParameter was specified using the old style (V0LayerParameter); try to
     // upgrade it.
@@ -178,6 +406,10 @@ bool UpgradeNetAsNeeded(const string& param_file, NetParameter* param) {
     LOG(WARNING) << "Note that future Caffe releases will only support "
                  << "input layers and not input fields.";
   }
+
+  if (Caffe::simpleFlag())
+    UpdateInputBlobDim(param);
+
   // NetParameter uses old style batch norm layers; try to upgrade it.
   if (NetNeedsBatchNormUpgrade(*param)) {
     LOG(INFO) << "Attempting to upgrade batch norm layers using deprecated "
@@ -246,7 +478,7 @@ void HackShapeAccordingToParallel(NetParameter* param) {
   do {                                                                    \
     if (layer->has_##param()) {                                           \
       auto lp = layer->mutable_##param();                                 \
-      lp->set_batch_size(lp->batch_size() * Caffe::data_parallel());      \
+      lp->set_batch_size(lp->batch_size());      \
       LOG(WARNING) << "setting N dim of layer " << layer->name()          \
                    << " to " << lp->batch_size() << " in multicore mode"; \
     }                                                                     \
@@ -258,17 +490,6 @@ void HackShapeAccordingToParallel(NetParameter* param) {
     HACK_BATCH_SIZE(hdf5_data_param);
     HACK_BATCH_SIZE(image_data_param);
     HACK_BATCH_SIZE(memory_data_param);
-
-    // handle input parameter
-    if (param->layer(i).has_input_param()) {
-      for (int j = 0; j < param->layer(i).input_param().shape_size(); j++) {
-        auto shape = param->mutable_layer(i)->mutable_input_param()->mutable_shape(j);
-        if (shape->dim_size() >= 1) {
-          // NCHW only!
-          shape->set_dim(0, shape->dim(0) * Caffe::data_parallel());
-        }
-      }
-    }
   }
 
 #undef HACK_BATCH_SIZE
@@ -288,11 +509,62 @@ void ReadNetParamsFromTextFileOrDie(const string& param_file,
 #endif
 }
 
-void ReadNetParamsFromBinaryFileOrDie(const string& param_file, NetParameter* param) {
+void ReadNetParamsFromBinaryFileOrDie(const string& param_file, NetParameter* param,
+         int opt_level, const NetParameter* param_without_weight) {
   CHECK(ReadProtoFromBinaryFile(param_file, param))
       << "Failed to parse NetParameter file: " << param_file;
   UpgradeNetAsNeeded(param_file, param);
+#ifdef USE_MLU
+  //  opt_level < 0 means ConvBnScale optimization structure is detected
+  if (opt_level < 0) {
+    auto layer_optimized = GetConvBnScaleStruct(*param, param_without_weight);
+    vector<int> layer_passed(param->layer_size(), 0);
+    for (int i = 0; i < param->layer_size(); i++) {
+      if (layer_optimized[i].size()) {
+        for (const auto index : layer_optimized[i]) {
+          layer_passed[index] = 1;
+          vector<vector<float>> alphabeta;
+          if (param->layer(index).type() == "BatchNorm") {
+            alphabeta = GetBnAlphaBeta(param->layer(index));
+          } else if (param->layer(index).type() == "Scale") {
+            alphabeta = GetScaleAlphaBeta(param->layer(index));
+          } else {
+            LOG(FATAL) << "Wrong layer type!";
+          }
+          UpdateConvWeights(param->mutable_layer(i), alphabeta);
+        }
+      }
+    }
+    NetParameter param_optimized;
+    DeleteOptimizedLayers(*param, &param_optimized, layer_passed);
+    *param = param_optimized;
+  }
+
+#endif
 }
+
+#ifdef USE_MLU
+void UpdateUseGlobalStats(NetParameter* target_param, const NetParameter& source_param) {
+  // layer index for net_param_without_weight_
+  int j = 0;
+  for (int i = 0; i < target_param->layer_size(); ++i) {
+    if (target_param->layer(i).type() == "BatchNorm") {
+      string layer_name = target_param->layer(i).name();
+      for (; j < source_param.layer_size(); j++) {
+        if (source_param.layer(j).type() == "BatchNorm" &&
+          source_param.layer(j).name() == layer_name  &&
+          source_param.layer(j).batch_norm_param().use_global_stats() !=
+          target_param->layer(i).batch_norm_param().use_global_stats()) {
+          target_param->mutable_layer(i)->mutable_batch_norm_param()
+            ->set_use_global_stats(source_param.layer(j)
+            .batch_norm_param().use_global_stats());
+          break;
+        }
+      }
+    }
+  }
+}
+#endif
 
 void ReadNetParamsFromTextMemOrDie(void* buffer, int buffer_size,
     NetParameter* param) {
@@ -1112,6 +1384,12 @@ const char* UpgradeV1LayerType(const V1LayerParameter_LayerType type) {
     return "Accuracy";
   case V1LayerParameter_LayerType_ARGMAX:
     return "ArgMax";
+  case V1LayerParameter_LayerType_BATCH_NORM:
+    return "BatchNorm";
+  case V1LayerParameter_LayerType_BIAS:
+    return "Bias";
+  case V1LayerParameter_LayerType_BN:
+    return "BN";
   case V1LayerParameter_LayerType_BNLL:
     return "BNLL";
   case V1LayerParameter_LayerType_CONCAT:
@@ -1120,10 +1398,20 @@ const char* UpgradeV1LayerType(const V1LayerParameter_LayerType type) {
     return "ContrastiveLoss";
   case V1LayerParameter_LayerType_CONVOLUTION:
     return "Convolution";
+  case V1LayerParameter_LayerType_CRELU:
+    return "CReLU";
+  case V1LayerParameter_LayerType_CROP:
+    return "Crop";
   case V1LayerParameter_LayerType_DECONVOLUTION:
     return "Deconvolution";
   case V1LayerParameter_LayerType_DATA:
     return "Data";
+  case V1LayerParameter_LayerType_DETECTION_OUTPUT:
+    return "DetectionOutput";
+  case V1LayerParameter_LayerType_DETECTION_POSE_OUTPUT:
+    return "DetectionPoseOutput";
+  case V1LayerParameter_LayerType_DETECTION_OUT:
+    return "DetectionOut";
   case V1LayerParameter_LayerType_DROPOUT:
     return "Dropout";
   case V1LayerParameter_LayerType_DUMMY_DATA:
@@ -1132,6 +1420,10 @@ const char* UpgradeV1LayerType(const V1LayerParameter_LayerType type) {
     return "EuclideanLoss";
   case V1LayerParameter_LayerType_ELTWISE:
     return "Eltwise";
+  case V1LayerParameter_LayerType_ELU:
+    return "ELU";
+  case V1LayerParameter_LayerType_EMBED:
+    return "Embed";
   case V1LayerParameter_LayerType_EXP:
     return "Exp";
   case V1LayerParameter_LayerType_FLATTEN:
@@ -1146,24 +1438,78 @@ const char* UpgradeV1LayerType(const V1LayerParameter_LayerType type) {
     return "Im2col";
   case V1LayerParameter_LayerType_IMAGE_DATA:
     return "ImageData";
+  case V1LayerParameter_LayerType_IMAGE_DETECT:
+    return "ImageDetect";
   case V1LayerParameter_LayerType_INFOGAIN_LOSS:
     return "InfogainLoss";
   case V1LayerParameter_LayerType_INNER_PRODUCT:
     return "InnerProduct";
+  case V1LayerParameter_LayerType_INPUT:
+    return "Input";
+  case V1LayerParameter_LayerType_INTERP:
+    return "Interp";
+  case V1LayerParameter_LayerType_LOG:
+    return "Log";
   case V1LayerParameter_LayerType_LRN:
     return "LRN";
+  case V1LayerParameter_LayerType_LSTM_RESHAPE:
+    return "LstmReshape";
   case V1LayerParameter_LayerType_MEMORY_DATA:
     return "MemoryData";
   case V1LayerParameter_LayerType_MULTINOMIAL_LOGISTIC_LOSS:
     return "MultinomialLogisticLoss";
   case V1LayerParameter_LayerType_MVN:
     return "MVN";
+  case V1LayerParameter_LayerType_NMS:
+    return "Nms";
+  case V1LayerParameter_LayerType_NORM:
+    return "Normalize";
+  case V1LayerParameter_LayerType_PARAMETER:
+    return "Parameter";
+  case V1LayerParameter_LayerType_PERMUTE:
+    return "Permute";
   case V1LayerParameter_LayerType_POOLING:
     return "Pooling";
   case V1LayerParameter_LayerType_POWER:
     return "Power";
+  case V1LayerParameter_LayerType_PRELU:
+    return "PReLU";
+  case V1LayerParameter_LayerType_PRIOR_BOX:
+    return "PriorBox";
+  case V1LayerParameter_LayerType_PRIORBOX:
+    return "PriorBox";
+  case V1LayerParameter_LayerType_PROPOSAL:
+    return "Proposal";
+  case V1LayerParameter_LayerType_PSROI_POOLING:
+    return "PSROIPooling";
+  case V1LayerParameter_LayerType_PYTHON:
+    return "Python";
+  case V1LayerParameter_LayerType_RECURRENT:
+    return "Recurrent";
+  case V1LayerParameter_LayerType_REDUCTION:
+    return "Reduction";
+  case V1LayerParameter_LayerType_RESHAPE:
+    return "Reshape";
   case V1LayerParameter_LayerType_RELU:
     return "ReLU";
+  case V1LayerParameter_LayerType_REORG:
+    return "Reorg";
+  case V1LayerParameter_LayerType_RESIZE_CROP:
+    return "Resizecrop";
+  case V1LayerParameter_LayerType_REGION:
+    return "Region";
+  case V1LayerParameter_LayerType_ROI_ALIGN:
+    return "ROIAlign";
+  case V1LayerParameter_LayerType_ROI_POOLING:
+    return "ROIPooling";
+  case V1LayerParameter_LayerType_RPN:
+    return "RPN";
+  case V1LayerParameter_LayerType_SCALE:
+    return "Scale";
+  case V1LayerParameter_LayerType_SHUFFLE_CHANNEL:
+    return "ShuffleChannel";
+  case V1LayerParameter_LayerType_SPP:
+    return "SPP";
   case V1LayerParameter_LayerType_SIGMOID:
     return "Sigmoid";
   case V1LayerParameter_LayerType_SIGMOID_CROSS_ENTROPY_LOSS:
@@ -1184,6 +1530,18 @@ const char* UpgradeV1LayerType(const V1LayerParameter_LayerType type) {
     return "WindowData";
   case V1LayerParameter_LayerType_THRESHOLD:
     return "Threshold";
+  case V1LayerParameter_LayerType_TRANSFORM:
+    return "Transformation";
+  case V1LayerParameter_LayerType_UPSAMPLE:
+    return "Upsample";
+  case V1LayerParameter_LayerType_UNPOOLING:
+    return "UnPooling";
+  case V1LayerParameter_LayerType_YUVTORGB:
+    return "YuvToRgb";
+  case V1LayerParameter_LayerType_YOLOV3:
+    return "Yolov3";
+  case V1LayerParameter_LayerType_YUVTONORMALIZEDGRAY:
+    return "YuvToNormalizedGray";
   default:
     LOG(FATAL) << "Unknown V1LayerParameter layer type: " << type;
     return "";
@@ -1192,6 +1550,22 @@ const char* UpgradeV1LayerType(const V1LayerParameter_LayerType type) {
 
 bool NetNeedsInputUpgrade(const NetParameter& net_param) {
   return net_param.input_size() > 0;
+}
+
+void UpdateInputBlobDim(NetParameter* net_param) {
+  for (int i = 0; i < net_param->layer_size(); ++i) {
+    if (net_param->layer(i).type() == "Input") {
+      LayerParameter* input_layer = net_param->mutable_layer(i);
+      InputParameter* input_param = input_layer->mutable_input_param();
+      for (int j = 0; j < input_param->shape_size(); j++) {
+        BlobShape* shape = input_param->mutable_shape(j);
+        if (shape->dim_size() == 4) {
+          shape->set_dim(0, Caffe::batchsize());
+          LOG(INFO) << "Tensor N is " << Caffe::batchsize();
+        }
+      }
+    }
+  }
 }
 
 void UpgradeNetInput(NetParameter* net_param) {

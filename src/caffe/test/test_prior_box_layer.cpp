@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -809,8 +809,6 @@ class MFUSPriorBoxLayerTest : public MFUSDeviceTest<TypeParam> {
   vector<Blob<Dtype>*> blob_bottom_vec_;
   vector<Blob<Dtype>*> blob_top_vec_;
   shared_ptr<Blob<Dtype> > ref_blob_top_;
-  int data_parallel;
-  int model_parallel;
 };
 
 TYPED_TEST_CASE(MFUSPriorBoxLayerTest, TestMFUSDevices);

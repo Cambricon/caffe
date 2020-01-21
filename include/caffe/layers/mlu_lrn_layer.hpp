@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -39,7 +39,6 @@ namespace caffe {
 /**
  * @brief Normalize the input in a local region across or within feature maps.
  *
- * TODO(dox): thorough documentation for Forward, Backward, and proto params.
  */
 template <typename Dtype>
 class MLULRNLayer : public LRNLayer<Dtype> {
@@ -54,7 +53,9 @@ class MLULRNLayer : public LRNLayer<Dtype> {
         mlu_scale_op_ptr_(nullptr),
         mlu_power_op_ptr_(nullptr),
         mlu_product_op_ptr_(nullptr),
-        mlu_scale1_op_ptr_(nullptr) {}
+        mlu_scale1_op_ptr_(nullptr),
+        input_quant_params(nullptr),
+        output_quant_params(nullptr) {}
   virtual ~MLULRNLayer();
   virtual void LayerSetUp(const vector<Blob<Dtype>*>& bottom,
                           const vector<Blob<Dtype>*>& top);
@@ -96,6 +97,8 @@ class MLULRNLayer : public LRNLayer<Dtype> {
 
   cnmlPoolOpParam_t pool_param_ptr_;
   cnmlAddPadOpParam_t addpad_param_ptr_;
+  cnmlQuantizedParam_t input_quant_params;
+  cnmlQuantizedParam_t output_quant_params;
 };
 
 #endif  // USE_MLU

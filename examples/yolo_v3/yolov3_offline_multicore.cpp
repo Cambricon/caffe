@@ -2,7 +2,7 @@
 All modification made by Cambricon Corporation: © 2018--2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -27,15 +27,15 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 #if defined(USE_MLU) && defined(USE_OPENCV)
-#include <opencv2/core/core.hpp>
-#include <opencv2/highgui/highgui.hpp>
-#include <opencv2/imgproc/imgproc.hpp>
 #include <algorithm>
 #include <condition_variable>  // NOLINT
 #include <iomanip>
 #include <iosfwd>
 #include <map>
 #include <memory>
+#include <opencv2/core/core.hpp>  // NOLINT
+#include <opencv2/highgui/highgui.hpp>  // NOLINT
+#include <opencv2/imgproc/imgproc.hpp>  // NOLINT
 #include <queue>
 #include <string>
 #include <thread>  // NOLINT
@@ -44,7 +44,10 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "blocking_queue.hpp"
 #include "cnrt.h"  // NOLINT
+#include "command_option.hpp"
 #include "common_functions.hpp"
+#include "simple_interface.hpp"
+#include "threadPool.h"
 
 using std::map;
 using std::pair;
@@ -60,486 +63,96 @@ int start;
 
 #define PRE_READ
 
-DEFINE_string(offlinemodel, "", "prototxt file used to find net configuration");
-DEFINE_string(meanfile, "", "file provides mean value(s) of image input.");
-DEFINE_string(meanvalue, "",
-              "mean value of input image. "
-              "One value or image channel number of values shoudl be provided "
-              "Either mean file or mean value should be provided");
-DEFINE_string(mludevice, "0",
-              "set using mlu device id, set multidevice seperated by ','"
-              "eg 0,1 when you use device id is 0 and 1, default: 0");
-DEFINE_int32(dataparallel, 1,
-             "dataparallel, data * model parallel should "
-             "be lower than or equal to 32 ");
-DEFINE_int32(threads, 1, "thread number");
-DEFINE_string(images, "", "image list file");
-DEFINE_int32(fix8, 0, "fp16 or fix8 mode. Default is fp16(0)");
-DEFINE_int32(int8, -1, "invalid(-1), fp16(0) or int8(1) mode. Default is invalid(-1)."
-    "If specified, use int8 value, else, use fix8 value");
-DEFINE_double(scale, 1, "scale for input data, mobilenet...");
-DEFINE_int32(dump, 0, "0 or 1, dump output images or not.");
-DEFINE_string(labels, "", "infomation about mapping from label to name");
-
-DEFINE_double(confidence, 0.25,
-              "Only keep detections with scores  equal "
-              "to or higher than the confidence.");
-DEFINE_double(nmsthresh, 0.45,
-              "Identify the optimal cell among all candidates "
-              " when the object lies in multiple cells of a grid");
-
-DEFINE_string(logdir, "",
-              "path to dump log file, to terminal "
-              "stderr by default");
-DEFINE_int32(fifosize, 2,
-             "set FIFO size of mlu input and output buffer, default is 2");
-DEFINE_string(outputdir, ".",
-              "The directory used to save output images and txt.");
-DEFINE_string(bboxanchordir, "./bbox_anchor/", "The directoy used to read"
-                             " anchor_tensors and x_y_offset");
-
-static void matrixMulti(vector<vector<float>>* a,
-                        const vector<vector<float>>& b, int numberOfRows,
-                        int selectColsLeft, int selectColsRight) {
-  for (int i = 0; i < numberOfRows; i++)
-    for (int j = selectColsLeft; j < selectColsRight; j++)
-      (*a)[i][j] = std::exp((*a)[i][j]) * b[i][j - selectColsLeft];
-}
-
-static void matrixMulti(vector<vector<float>>* a, int b, int numberOfRows,
-                        int selectColsLeft, int selectColsRight) {
-  for (int i = 0; i < numberOfRows; i++)
-    for (int j = selectColsLeft; j < selectColsRight; j++)
-      (*a)[i][j] = (*a)[i][j] * b;
-}
-
-static void matrixAdd(vector<vector<float>>* a, const vector<vector<float>>& b,
-                      int numberOfRows, int selectColsLeft,
-                      int selectColsRight) {
-  for (int i = 0; i < numberOfRows; i++) {
-    for (int j = selectColsLeft; j < selectColsRight; j++) {
-      (*a)[i][j] = (*a)[i][j] + b[i][j];
-    }
-  }
-}
-
-// sigmoid two vector
-static void sigmoid(vector<vector<float>>* B, int col) {
-  vector<vector<float>>::iterator it_begin = B->begin();
-  for (; it_begin != B->end(); ++it_begin) {
-    for (int i = col; i < col + 1; i++) {
-      (*it_begin)[i] = 1 / (1 + std::exp(-(*it_begin)[i]));
-    }
-  }
-}
-
-// sigmoid two vector
-static void sigmoid(vector<vector<float>>* B, int colsLeft, int colsRight) {
-  vector<vector<float>>::iterator it_begin = B->begin();
-  for (; it_begin != B->end(); ++it_begin) {
-    for (int i = colsLeft; i < colsRight; i++) {
-      (*it_begin)[i] = 1 / (1 + std::exp(-(*it_begin)[i]));
-    }
-  }
-}
-
-// reshape two vector
-static void matrixReshape(vector<vector<float>> A, vector<vector<float>>* B,
-                          int r, int c) {
-  int m = A.size(), n = A[0].size();
-  if (m * n != r * c) {
-    *B = std::move(A);
-  } else {
-    vector<vector<float>> C(r);
-    for (int x = 0; x < C.size(); x++) C[x].resize(c);
-    for (int i = 0; i < r; ++i) {
-      for (int j = 0; j < c; ++j) {
-        int k = i * c + j;
-        C[i][j] = static_cast<float>(A[k / n][k % n]);
-      }
-    }
-    *B = std::move(C);
-  }
-}
-
-static vector<vector<float>> get_blob_data(const vector<int>& yolov3_shape,
-                                           const float* result_buffer) {
-  int batchs = yolov3_shape[0];
-  int channels = yolov3_shape[1];
-  int width = yolov3_shape[2];
-  int height = yolov3_shape[3];
-
-  vector<vector<float>> output_data(channels, vector<float>(width * height));
-  for (int n = 0; n < batchs; ++n) {
-    for (int c = 0; c < channels; ++c) {
-      for (int h = 0; h < height; ++h) {
-        for (int w = 0; w < width; ++w) {
-          output_data[c][h * width + w] =
-              result_buffer[c * height * width + h * width + w];
-        }
-      }
-    }
-  }
-  return output_data;
-}
-
-// transpose two vector  255*169->169*255
-static void transpose(const vector<vector<float>>& A,
-                      vector<vector<float>>* B) {
-  if (A.size() == 0) {
-    LOG(FATAL) << "input vector is equal to 0" << std::endl;
-  }
-  vector<vector<float>> C(A[0].size());
-  for (int i = 0; i < C.size(); i++) C[i].resize(A.size());
-  for (int i = 0; i < A[0].size(); i++) {
-    for (int j = 0; j < A.size(); j++) {
-      C[i][j] = A[j][i];
-    }
-  }
-  *B = std::move(C);
-}
-
-static void transform_tensor(vector<vector<float>> tensor_output,
-                             vector<vector<float>>* tensor_data,
-                             int num_classes, vector<vector<float>> x_y_offset,
-                             vector<vector<float>> anchor_tensor) {
-  int input_dim = 416;
-  int stride = input_dim / std::sqrt(tensor_output[0].size());  // 32
-  int gride_size = input_dim / stride;                          // 13
-  int bbox_attrs = 5 + num_classes;                             // 85
-  int anchor_num = 3;
-
-  vector<vector<float>> tensor_trans;
-  transpose(tensor_output, &tensor_trans);  // 255*169->169*255
-
-  matrixReshape(tensor_trans, tensor_data, gride_size * gride_size * anchor_num,
-                bbox_attrs);  // 169*255->507*85
-
-  sigmoid(tensor_data, 0);
-  sigmoid(tensor_data, 1);
-  sigmoid(tensor_data, 4);
-
-  matrixAdd(tensor_data, x_y_offset, tensor_data->size(), 0, 2);
-  matrixMulti(tensor_data, anchor_tensor, tensor_data->size(), 2, 4);
-  sigmoid(tensor_data, 5, 85);
-  matrixMulti(tensor_data, stride, tensor_data->size(), 0, 4);
-}
-
-static void concatenate(vector<vector<float>>* all_boxes,
-                        const vector<vector<float>>& boxes_13,
-                        const vector<vector<float>>& boxes_26,
-                        const vector<vector<float>>& boxes_52) {
-  vector<vector<float>> temp(
-      (boxes_13.size() + boxes_26.size() + boxes_52.size()),
-      vector<float>(boxes_13[0].size(), 0));
-  for (int j = 0; j < temp.size(); j++) {
-    for (int k = 0; k < temp[0].size(); k++) {
-      if (j < boxes_13.size()) {
-        temp[j][k] = boxes_13[j][k];
-      } else {
-        if (j >= boxes_13.size() && j < (boxes_13.size() + boxes_26.size())) {
-          temp[j][k] = boxes_26[j - boxes_13.size()][k];
-        } else {
-          temp[j][k] = boxes_52[j - (boxes_13.size() + boxes_26.size())][k];
-        }
-      }
-    }
-  }
-  *all_boxes = std::move(temp);
-}
-
-static void fill_zeros(vector<vector<float>>* all_boxes, int cols,
-                       float confidence) {
-  for (int i = 0; i < all_boxes->size(); i++) {
-    if ((*all_boxes)[i][cols] > confidence)
-      continue;
-    else
-      (*all_boxes)[i][cols] = 0;
-  }
-}
-
-static vector<vector<float>> filter_boxes(vector<vector<float>>* all_boxes,
-                                          vector<float>* max_class_score,
-                                          vector<float>* max_class_idx) {
-  vector<vector<float>> temp(all_boxes->size(), vector<float>(5 + 2, 0));
-  for (int i = 0; i < all_boxes->size(); i++) {
-    for (int j = 0; j < 7; j++) {
-      if (j < 5)
-        temp[i][j] = (*all_boxes)[i][j];
-      else if (j == 5)
-        temp[i][j] = (*max_class_score)[i];
-      else if (j == 6)
-        temp[i][j] = (*max_class_idx)[i];
-      else
-        LOG(FATAL) << " filter_boxes index error ";
-    }
-  }
-  vector<vector<float>> vec;
-  for (int m = 0; m < temp.size(); m++) {
-    if (temp[m][4] == 0)
-      continue;
-    else
-      vec.push_back(temp[m]);
-  }
-  return vec;
-}
-
-static void unique_vector(vector<vector<float>>* input_vector,
-                          vector<float>* output_vector) {
-  for (int i = 0; i < input_vector->size(); i++) {
-    (*output_vector).push_back((*input_vector)[i][6]);
-  }
-  sort((*output_vector).begin(), (*output_vector).end());
-  auto new_end = unique((*output_vector).begin(), (*output_vector).end());
-  (*output_vector).erase(new_end, (*output_vector).end());
-}
-
-static float findMax(vector<float> vec) {
-  float max = -999;
-  for (auto v : vec) {
-    if (max < v) max = v;
-  }
-  return max;
-}
-
-static int getPositionOfMax(vector<float> vec, float max) {
-  auto distance = find(vec.begin(), vec.end(), max);
-  return distance - vec.begin();
-}
-
-static void nms_by_classes(vector<vector<float>> sort_boxes,
-                           vector<float>* ious, int start) {
-  for (int i = start + 1; i < sort_boxes.size(); i++) {
-    float first_x1 = sort_boxes[start][0];
-    float first_y1 = sort_boxes[start][1];
-    float first_x2 = sort_boxes[start][2];
-    float first_y2 = sort_boxes[start][3];
-
-    float next_x1 = sort_boxes[i][0];
-    float next_y1 = sort_boxes[i][1];
-    float next_x2 = sort_boxes[i][2];
-    float next_y2 = sort_boxes[i][3];
-
-    float inter_x1 = std::max(first_x1, next_x1);
-    float inter_y1 = std::max(first_y1, next_y1);
-    float inter_x2 = std::min(first_x2, next_x2);
-    float inter_y2 = std::min(first_y2, next_y2);
-    float inter_area, first_area, next_area, union_area, iou;
-    if ((inter_x2 - inter_x1 + 1 > 0) && (inter_y2 - inter_y1 + 1 > 0))
-      inter_area = (inter_x2 - inter_x1 + 1) * (inter_y2 - inter_y1 + 1);
-    else
-      inter_area = 0;
-    first_area = (first_x2 - first_x1 + 1) * (first_y2 - first_y1 + 1);
-    next_area = (next_x2 - next_x1 + 1) * (next_y2 - next_y1 + 1);
-    union_area = first_area + next_area - inter_area;
-    iou = inter_area / union_area;
-    (*ious).push_back(iou);
-  }
-}
-
-static void get_detection(vector<vector<float>> all_boxes,
-                          vector<vector<float>>* final_boxes, int num_classes,
-                          float confidence, float nms_thresh) {
-  fill_zeros(&all_boxes, 4, confidence);
-  vector<vector<float>> boxes_copy;
-  boxes_copy = all_boxes;
-  for (int i = 0; i < all_boxes.size(); i++) {
-    all_boxes[i][0] = boxes_copy[i][0] - boxes_copy[i][2] / 2;
-    all_boxes[i][1] = boxes_copy[i][1] - boxes_copy[i][3] / 2;
-    all_boxes[i][2] = boxes_copy[i][0] + boxes_copy[i][2] / 2;
-    all_boxes[i][3] = boxes_copy[i][1] + boxes_copy[i][3] / 2;
-  }
-
-  vector<float> max_class_idx;
-  vector<float> max_class_score;
-  for (int j = 0; j < all_boxes.size(); j++) {
-    vector<float>::iterator biggest =
-        std::max_element(std::begin(all_boxes[j]) + 5, std::end(all_boxes[j]));
-    max_class_score.push_back(*biggest);
-    max_class_idx.push_back(
-        std::distance(std::begin(all_boxes[j]) + 5, biggest));
-  }
-
-  vector<vector<float>> boxes_cleaned;
-  boxes_cleaned = filter_boxes(&all_boxes, &max_class_score, &max_class_idx);
-  vector<float> unique_classes;
-  unique_vector(&boxes_cleaned, &unique_classes);
-  vector<vector<float>> curr_classes;
-  for (auto v : unique_classes) {
-    for (int m = 0; m < boxes_cleaned.size(); m++) {
-      if (boxes_cleaned[m][6] == v)
-        curr_classes.push_back(boxes_cleaned[m]);
-      else
-        continue;
-    }
-    vector<float> object_score;
-    for (int n = 0; n < curr_classes.size(); n++) {
-      object_score.push_back(curr_classes[n][4]);
-    }
-    vector<float> sort_score, sort_idx;
-    for (int i = 0; i < object_score.size(); i++) {
-      float maxNumber = findMax(object_score);
-      sort_score.push_back(maxNumber);
-      int maxIndex = getPositionOfMax(object_score, maxNumber);
-      sort_idx.push_back(maxIndex);
-      object_score[maxIndex] = -999;
-    }
-    vector<vector<float>> sort_boxes;
-    for (int j = 0; j < sort_idx.size(); j++) {
-      sort_boxes.push_back(curr_classes[sort_idx[j]]);
-    }
-    vector<float> ious;
-    for (int k = 0; k < sort_boxes.size(); k++) {
-      ious.clear();
-      nms_by_classes(sort_boxes, &ious, k);
-      int dele_number = 0;
-
-      for (int s = 0; s < ious.size(); s++) {
-        if (ious[s] > nms_thresh) {
-          sort_boxes.erase(sort_boxes.begin() + k - dele_number + 1 + s);
-          dele_number = dele_number + 1;
-        } else {
-          continue;
-        }
-      }
-    }
-    for (int t = 0; t < sort_boxes.size(); t++) {
-      (*final_boxes).push_back(sort_boxes[t]);
-    }
-    curr_classes.clear();
-    object_score.clear();
-    sort_score.clear();
-    sort_idx.clear();
-    sort_boxes.clear();
-  }
-}
-
-static void readtxt(vector<vector<vector<float>>>* x_y_offsets,
-                    vector<vector<vector<float>>>* anchor_tensors,
-                    vector<int> size_rows, vector<string> anchor_strs) {
-  int size = x_y_offsets->size();
-  for (int i = 0; i < size; i++) {
-    std::ifstream infile_1;
-    string filename_1 = FLAGS_bboxanchordir + "/x_y_offset_"
-        + anchor_strs[i] + ".txt";
-    infile_1.open(filename_1);
-    for (int m = 0; m < size_rows[i]; m++) {
-      for (int n = 0; n < 2; n++) {
-        infile_1 >> (*x_y_offsets)[i][m][n];
-      }
-    }
-    infile_1.close();
-    std::ifstream infile_2;
-    string filename_2 = FLAGS_bboxanchordir +  "/anchors_tensor_"
-        + anchor_strs[i] + ".txt";
-    infile_2.open(filename_2);
-    for (int m = 0; m < size_rows[i]; m++) {
-      for (int n = 0; n < 2; n++) {
-        infile_2 >> (*anchor_tensors)[i][m][n];
-      }
-    }
-  }
-}
+DEFINE_int32(dump, 1, "0 or 1, dump output images or not.");
+DEFINE_string(outputdir, ".", "The directoy used to save output images");
 
 static void WriteVisualizeBBox_offline(
     const vector<cv::Mat>& images,
     const vector<vector<vector<float>>> detections,
     const vector<string>& labelToDisplayName, const vector<string>& imageNames,
-    int input_dim) {
+    int input_dim, const int from, const int to) {
   // Retrieve detections.
-  const int imageNumber = images.size();
-  for (int i = 0; i < imageNumber; ++i) {
+  for (int i = from; i < to; ++i) {
     if (imageNames[i] == "null") continue;
+    cv::Mat image;
+    image = images[i];
     vector<vector<float>> result = detections[i];
-    cv::Mat image = images[i];
     std::string name = imageNames[i];
     int positionMap = imageNames[i].rfind("/");
     if (positionMap > 0 && positionMap < imageNames[i].size()) {
       name = name.substr(positionMap + 1);
     }
-    positionMap = name.rfind(".");
+    positionMap = name.find(".");
     if (positionMap > 0 && positionMap < name.size()) {
       name = name.substr(0, positionMap);
     }
-    // this is used to cancel "yolov3_offline_" in name
-    std::string prefix = "yolov3_offline_";
-    name = name.substr(prefix.size());
-    name = FLAGS_outputdir + "/" + name + ".txt";
-    std::ofstream fileMap(name);
-
+    string filename = FLAGS_outputdir + "/" + name + ".txt";
+    std::ofstream fileMap(filename);
     float scaling_factors = std::min(
         static_cast<float>(input_dim) / static_cast<float>(images[i].cols),
         static_cast<float>(input_dim) / static_cast<float>(images[i].rows));
     for (int j = 0; j < result.size(); j++) {
       result[j][0] =
-          result[j][0] -
-          static_cast<float>(input_dim - scaling_factors * images[i].cols) /
-              2.0;
+          result[j][0] * input_dim -
+          static_cast<float>(input_dim - scaling_factors * image.cols) / 2.0;
       result[j][2] =
-          result[j][2] -
-          static_cast<float>(input_dim - scaling_factors * images[i].cols) /
-              2.0;
+          result[j][2] * input_dim -
+          static_cast<float>(input_dim - scaling_factors * image.cols) / 2.0;
       result[j][1] =
-          result[j][1] -
-          static_cast<float>(input_dim - scaling_factors * images[i].rows) /
-              2.0;
+          result[j][1] * input_dim -
+          static_cast<float>(input_dim - scaling_factors * image.rows) / 2.0;
       result[j][3] =
-          result[j][3] -
-          static_cast<float>(input_dim - scaling_factors * images[i].rows) /
-              2.0;
+          result[j][3] * input_dim -
+          static_cast<float>(input_dim - scaling_factors * image.rows) / 2.0;
 
       for (int k = 0; k < 4; k++) {
         result[j][k] = result[j][k] / scaling_factors;
       }
     }
+
     for (int j = 0; j < result.size(); j++) {
-      // bounding boxes bundary check
       result[j][0] = result[j][0] < 0 ? 0 : result[j][0];
       result[j][2] = result[j][2] < 0 ? 0 : result[j][2];
       result[j][1] = result[j][1] < 0 ? 0 : result[j][1];
       result[j][3] = result[j][3] < 0 ? 0 : result[j][3];
-
-      result[j][0] =
-          result[j][0] > images[i].cols ? images[i].cols : result[j][0];
-      result[j][2] =
-          result[j][2] > images[i].cols ? images[i].cols : result[j][2];
-      result[j][1] =
-          result[j][1] > images[i].rows ? images[i].rows : result[j][1];
-      result[j][3] =
-          result[j][3] > images[i].rows ? images[i].rows : result[j][3];
+      result[j][0] = result[j][0] > image.cols ? image.cols : result[j][0];
+      result[j][2] = result[j][2] > image.cols ? image.cols : result[j][2];
+      result[j][1] = result[j][1] > image.rows ? image.rows : result[j][1];
+      result[j][3] = result[j][3] > image.rows ? image.rows : result[j][3];
     }
-
     for (int j = 0; j < result.size(); j++) {
-      cv::Point p1(static_cast<int>(result[j][0]),
-                   static_cast<int>(result[j][1]));
-      cv::Point p2(static_cast<int>(result[j][2]),
-                   static_cast<int>(result[j][3]));
-      cv::rectangle(image, p1, p2, cv::Scalar(0, 0, 255), 1, 1, 0);
-      cv::Point p3(static_cast<int>(result[j][0]),
-                   static_cast<int>(result[j][1]) - 20);
-      cv::Point p4(static_cast<int>(result[j][0]) + 100,
-                   static_cast<int>(result[j][1]));
-      cv::rectangle(image, p3, p4, cv::Scalar(255, 0, 0), -1, 4);
+      int x0 = static_cast<int>(result[j][0]);
+      int y0 = static_cast<int>(result[j][1]);
+      int x1 = static_cast<int>(result[j][2]);
+      int y1 = static_cast<int>(result[j][3]);
+      cv::Point p1(x0, y0);
+      cv::Point p2(x1, y1);
+      cv::rectangle(image, p1, p2, cv::Scalar(0, 255, 0), 2);
       stringstream ss;
       ss << round(result[j][4] * 1000) / 1000.0;
       std::string str =
-          labelToDisplayName[static_cast<int>(result[j][6])] + ":" + ss.str();
-      cv::Point p5(static_cast<int>(result[j][0]),
-                   static_cast<int>(result[j][1]) - 1);
+          labelToDisplayName[static_cast<int>(result[j][5])] + ":" + ss.str();
+      cv::Point p5(x0, y0 + 10);
       cv::putText(image, str, p5, cv::FONT_HERSHEY_SIMPLEX, 0.5,
-                  cv::Scalar(255, 215, 0), 1);
+                  cv::Scalar(255, 0, 0), 0.5);
 
-      fileMap << labelToDisplayName[static_cast<int>(result[j][6])] << " "
-              << ss.str() << " " << static_cast<float>(p1.x) / image.cols << " "
-              << static_cast<float>(p1.y) / image.rows << " "
-              << static_cast<float>(p2.x) / image.cols << " "
-              << static_cast<float>(p2.y) / image.rows << " " << image.cols
-              << " " << image.rows << std::endl;
+      fileMap << labelToDisplayName[static_cast<int>(result[j][5])] << " "
+              << ss.str() << " "
+              << static_cast<float>(result[j][0]) / image.cols << " "
+              << static_cast<float>(result[j][1]) / image.rows << " "
+              << static_cast<float>(result[j][2]) / image.cols << " "
+              << static_cast<float>(result[j][3]) / image.rows << " "
+              << image.cols << " " << image.rows << std::endl;
     }
     fileMap.close();
-    cv::imwrite((FLAGS_outputdir + "/" + imageNames[i].c_str()), image);
+    stringstream ss;
+    string outFile;
+    ss << FLAGS_outputdir << "/yolov3_offline_" << name << ".jpg";
+    ss >> outFile;
+    cv::imwrite(outFile.c_str(), image);
   }
 }
+
 void setDeviceId(int dev_id) {
   unsigned devNum;
   CNRT_CHECK(cnrtGetDeviceCount(&devNum));
@@ -559,16 +172,14 @@ class PostProcessor;
 
 class Inferencer {
   public:
-  Inferencer(const string& offlinemodel, const int& dp,
-             const int& deviceId, const int& devicesize);
+  Inferencer(const cnrtRuntimeContext_t rt_ctx, const int& id);
   ~Inferencer();
   int n() { return inNum_; }
   int c() { return inChannel_; }
   int h() { return inHeight_; }
   int w() { return inWidth_; }
-  vector<vector<int>> outputshape() { return outputShape_; }
-  cnrtDataDescArray_t inDescs() { return inDescs_; }
-  cnrtDataDescArray_t outDescs() { return outDescs_; }
+  bool simpleFlag() { return simple_flag_; }
+  vector<int*> outDimValues() { return outDimValues_; }
   void pushValidInputData(void** data);
   void pushFreeInputData(void** data);
   void** popValidInputData();
@@ -578,10 +189,11 @@ class Inferencer {
   void** popValidOutputData();
   void** popFreeOutputData();
   void pushValidInputNames(vector<string> rawImages);
+  void pushValidInputDataAndNames(void** data, const vector<string>& images);
   vector<string> popValidInputNames();
-  void run();
-  inline int modelParallel() { return modelParallel_; }
-  inline int dataParallel() { return dataParallel_; }
+  vector<void*> outCpuPtrs_;
+  vector<void*> outSyncPtrs_;
+  void simpleRun();
   inline int inBlobNum() { return inBlobNum_; }
   inline int outBlobNum() { return outBlobNum_; }
   inline int threadId() { return threadId_; }
@@ -590,14 +202,13 @@ class Inferencer {
   inline float inferencingTime() { return inferencingTime_; }
   inline void setThreadId(int id) { threadId_ = id; }
   inline void setPostProcessor(PostProcessor* p) { postProcessor_ = p; }
-  inline void pushInPtrVector(void** data) { inPtrVector_.push_back(data); }
-  inline void pushOutPtrVector(void** data) { outPtrVector_.push_back(data); }
+  inline int64_t* inputSizeArray() { return inputSizeArray_; }
+  inline int64_t* outputSizeArray() { return outputSizeArray_; }
+  inline cnrtDataType_t* inputDataTypeArray() { return inputDataTypeArray_; }
+  inline cnrtDataType_t* outputDataTypeArray() { return outputDataTypeArray_; }
 
-  inline vector<int> outCount() {
-    vector<int> storage;
-    for (int i = 0; i < 3; i++) storage.push_back(outCount_[i]);
-    return storage;
-  }
+  private:
+  void getIODataDesc();
 
   private:
   BlockingQueue<void**> validInputFifo_;
@@ -607,39 +218,42 @@ class Inferencer {
   BlockingQueue<vector<string>> imagesFifo_;
 
   cnrtModel_t model_;
-  cnrtDataDescArray_t inDescs_, outDescs_;
   cnrtQueue_t queue_;
   cnrtFunction_t function_;
+  cnrtRuntimeContext_t rt_ctx_;
   cnrtDim3_t dim_;
 
+  int64_t* inputSizeArray_;
+  int64_t* outputSizeArray_;
+  cnrtDataType_t* inputDataTypeArray_;
+  cnrtDataType_t* outputDataTypeArray_;
+  vector<int> inCounts_, outCounts_;
+  vector<int> inDimNums_, outDimNums_;
+  vector<int*> inDimValues_, outDimValues_;
+
+  bool simple_flag_;
   int inBlobNum_, outBlobNum_;
   unsigned int inNum_, inChannel_, inHeight_, inWidth_;
-  unsigned int outNum_[3], outChannel_[3], outHeight_[3], outWidth_[3];
-  vector<vector<int>> outputShape_;
-  int outCount_[3];
+  unsigned int outNum_, outChannel_, outHeight_, outWidth_;
   int threadId_;
   int deviceId_;
   int deviceSize_;
-  int dataParallel_;
-  int modelParallel_;
+  int parallel_ = 1;
   float inferencingTime_;
   PostProcessor* postProcessor_;
-  vector<void**> inPtrVector_;
-  vector<void**> outPtrVector_;
+  std::mutex infr_mutex_;
 };
 
 class PostProcessor {
   public:
   explicit PostProcessor(const int& deviceId)
-      : threadId_(0), deviceId_(deviceId) {}
+      : threadId_(0), deviceId_(deviceId) {
+    tp_ = new zl::ThreadPool(SimpleInterface::thread_num);
+  }
   ~PostProcessor() {
-    delete[] reinterpret_cast<float*>(outCpuPtrs_[0]);
-    delete[] reinterpret_cast<float*>(outCpuPtrs_[1]);
-    delete[] reinterpret_cast<float*>(outCpuPtrs_[2]);
-    delete outCpuPtrs_;
+    delete tp_;
   }
   void run();
-  vector<vector<vector<float>>> detectionOutput(float*, float*, float*);
   inline void setThreadId(int id) { threadId_ = id; }
   inline void setInferencer(Inferencer* p) { inferencer_ = p; }
   inline int top1() { return top1_; }
@@ -651,10 +265,7 @@ class PostProcessor {
   int deviceId_;
   int top1_;
   int top5_;
-  void** outCpuPtrs_;
-  vector<vector<vector<float>>> tensors;
-  vector<vector<vector<float>>> x_y_offsets;
-  vector<vector<vector<float>>> anchor_tensors;
+  zl::ThreadPool* tp_;
 };
 
 class DataProvider {
@@ -663,8 +274,27 @@ class DataProvider {
                const int& deviceId, const queue<string>& images)
       : threadId_(0), deviceId_(deviceId), imageList(images) {}
   ~DataProvider() {
-    delete[] reinterpret_cast<float*>(cpuData_[0]);
+    delete [] reinterpret_cast<float*>(cpuData_[0]);
+    setDeviceId(deviceId_);
     delete cpuData_;
+    if (inputSyncData_ != nullptr) {
+      for (int i = 0; i < inferencer_->inBlobNum(); ++i) {
+        if (inputSyncData_[i] != nullptr) free(inputSyncData_[i]);
+      }
+      free(inputSyncData_);
+    }
+    for (auto ptr : inPtrVector_) {
+      for (int i = 0; i < this->inferencer_->inBlobNum(); i++) {
+        cnrtFree(ptr[i]);
+      }
+      if (ptr != nullptr) free(ptr);
+    }
+    for (auto ptr : outPtrVector_) {
+      for (int i = 0; i < this->inferencer_->outBlobNum(); i++) {
+        cnrtFree(ptr[i]);
+      }
+      if (ptr != nullptr) free(ptr);
+    }
   }
   void run();
   void SetMean(const string&, const string&);
@@ -677,6 +307,8 @@ class DataProvider {
     inferencer_ = p;
     inNum_ = p->n();  // make preRead happy
   }
+  inline void pushInPtrVector(void** data) { inPtrVector_.push_back(data); }
+  inline void pushOutPtrVector(void** data) { outPtrVector_.push_back(data); }
 
   private:
   int inNum_, inChannel_, inHeight_, inWidth_;
@@ -687,8 +319,11 @@ class DataProvider {
   Inferencer* inferencer_;
   cv::Size inGeometry_;
   void** cpuData_;
+  void** inputSyncData_;
   vector<vector<cv::Mat>> inImages_;
   vector<vector<string>> imageName_;
+  vector<void**> inPtrVector_;
+  vector<void**> outPtrVector_;
 };
 
 void DataProvider::preRead() {
@@ -697,6 +332,7 @@ void DataProvider::preRead() {
     vector<string> imageNameVec;
     int imageLeft = imageList.size();
     string file = imageList.front();
+    cv::Size imgsize = cv::Size(inferencer_->w(), inferencer_->h());
     for (int i = 0; i < inNum_; i++) {
       if (i < imageLeft) {
         file = imageList.front();
@@ -704,10 +340,10 @@ void DataProvider::preRead() {
         imageList.pop();
         if (file.find(" ") != string::npos)
           file = file.substr(0, file.find(" "));
-        cv::Mat img = cv::imread(file, -1);
+        cv::Mat img = readImage(file, imgsize, FLAGS_yuv);
         rawImages.push_back(img);
       } else {
-        cv::Mat img = cv::imread(file, -1);
+        cv::Mat img = readImage(file, imgsize, FLAGS_yuv);
         rawImages.push_back(img);
         imageNameVec.push_back("null");
       }
@@ -719,21 +355,25 @@ void DataProvider::preRead() {
 
 void DataProvider::run() {
   setDeviceId(deviceId_);
-  int channel = threadId_ / inferencer_->deviceSize() % 4;
-  cnrtSetCurrentChannel((cnrtChannelType_t)channel);
   for (int i = 0; i < FLAGS_fifosize; i++) {
-    void** inputMluPtrS;
-    void** outputMluPtrS;
-    cnrtMallocBatchByDescArray(&inputMluPtrS, inferencer_->inDescs(),
-                               inferencer_->inBlobNum(),
-                               inferencer_->dataParallel());
-    cnrtMallocBatchByDescArray(&outputMluPtrS, inferencer_->outDescs(),
-                               inferencer_->outBlobNum(),
-                               inferencer_->dataParallel());
+    int inputNum = inferencer_->inBlobNum();
+    int outputNum = inferencer_->outBlobNum();
+    void** inputMluPtrS =
+      reinterpret_cast<void**>(malloc(sizeof(void*) * inputNum));
+    void** outputMluPtrS =
+      reinterpret_cast<void**>(malloc(sizeof(void*) * outputNum));
+
+    // malloc input
+    for (int i = 0; i < inputNum; i++) {
+      CNRT_CHECK(cnrtMalloc(&(inputMluPtrS[i]), inferencer_->inputSizeArray()[i]));
+    }
+    for (int i = 0; i < outputNum; i++) {
+      CNRT_CHECK(cnrtMalloc(&(outputMluPtrS[i]), inferencer_->outputSizeArray()[i]));
+    }
     inferencer_->pushFreeInputData(inputMluPtrS);
     inferencer_->pushFreeOutputData(outputMluPtrS);
-    inferencer_->pushInPtrVector(inputMluPtrS);
-    inferencer_->pushOutPtrVector(outputMluPtrS);
+    pushInPtrVector(inputMluPtrS);
+    pushOutPtrVector(outputMluPtrS);
   }
 
   inNum_ = inferencer_->n();
@@ -742,9 +382,11 @@ void DataProvider::run() {
   inWidth_ = inferencer_->w();
   inGeometry_ = cv::Size(inWidth_, inHeight_);
   SetMean(FLAGS_meanfile, FLAGS_meanvalue);
-
   cpuData_ = new (void*);
   cpuData_[0] = new float[inNum_ * inChannel_ * inHeight_ * inWidth_];
+  inputSyncData_ =
+    reinterpret_cast<void**>(malloc(sizeof(void*) * inferencer_->inBlobNum()));
+  inputSyncData_[0] = malloc(inferencer_->inputSizeArray()[0]);
 
   std::unique_lock<std::mutex> lk(condition_m);
   LOG(INFO) << "Waiting ...";
@@ -761,7 +403,7 @@ void DataProvider::run() {
     vector<string> imageNameVec;
     int imageLeft = imageList.size();
     string file = imageList.front();
-
+    cv::Size imgsize = cv::Size(inferencer_->w(), inferencer_->h());
     for (int i = 0; i < inNum_; i++) {
       if (i < imageLeft) {
         file = imageList.front();
@@ -769,10 +411,10 @@ void DataProvider::run() {
         imageList.pop();
         if (file.find(" ") != string::npos)
           file = file.substr(0, file.find(" "));
-        cv::Mat img = cv::imread(file, -1);
+        cv::Mat img = readImage(file, imgsize, FLAGS_yuv);
         rawImages.push_back(img);
       } else {
-        cv::Mat img = cv::imread(file, -1);
+        cv::Mat img = readImage(file, imgsize, FLAGS_yuv);
         rawImages.push_back(img);
         imageNameVec.push_back("null");
       }
@@ -786,17 +428,44 @@ void DataProvider::run() {
 
     void** mluData = inferencer_->popFreeInputData();
     Timer copyin;
-    CNRT_CHECK(cnrtMemcpyBatchByDescArray(
-        mluData, cpuData_, inferencer_->inDescs(), inferencer_->inBlobNum(),
-        inferencer_->dataParallel(), CNRT_MEM_TRANS_DIR_HOST2DEV));
+    cnrtDataType_t mluDtype = inferencer_->inputDataTypeArray()[0];
+    cnrtDataType_t cpuDtype;
+    if (FLAGS_yuv) {
+      cpuDtype = CNRT_UINT8;
+    } else {
+      cpuDtype = CNRT_FLOAT32;
+    }
+    int dimValuesCpu[4] = {inNum_, inChannel_,
+                           inHeight_, inWidth_};
+    int dimOrder[4] = {0, 2, 3, 1};  // NCHW --> NHWC
+    if (cpuDtype != mluDtype) {
+      CNRT_CHECK(cnrtTransOrderAndCast(cpuData_[0],
+                                       cpuDtype,
+                                       inputSyncData_[0],
+                                       mluDtype,
+                                       NULL,
+                                       4,
+                                       dimValuesCpu,
+                                       dimOrder));
+    } else {
+        CNRT_CHECK(cnrtTransDataOrder(cpuData_[0],
+                                      cpuDtype,
+                                      inputSyncData_[0],
+                                      4,
+                                      dimValuesCpu,
+                                      dimOrder));
+    }
+    CNRT_CHECK(cnrtMemcpy(reinterpret_cast<void*>(mluData[0]),
+                          inputSyncData_[0],
+                          inferencer_->inputSizeArray()[0],
+                          CNRT_MEM_TRANS_DIR_HOST2DEV));
     copyin.log("copyin time ...");
-    inferencer_->pushValidInputData(mluData);
-    inferencer_->pushValidInputNames(imageNameVec);
+
+    inferencer_->pushValidInputDataAndNames(mluData, imageNameVec);
   }
 
   LOG(INFO) << "DataProvider: no data ...";
   // tell inferencer there is no more images to process
-  inferencer_->pushValidInputData(nullptr);
 }
 
 void DataProvider::WrapInputLayer(vector<vector<cv::Mat>>* wrappedImages) {
@@ -807,46 +476,62 @@ void DataProvider::WrapInputLayer(vector<vector<cv::Mat>>* wrappedImages) {
   // right offset of input stream
   int width = inferencer_->w();
   int height = inferencer_->h();
+  int channels = FLAGS_yuv ? 1 : inferencer_->c();
   float* data = reinterpret_cast<float*>(cpuData_[0]);
 
   for (int i = 0; i < inferencer_->n(); ++i) {
     wrappedImages->push_back(vector<cv::Mat>());
-    for (int j = 0; j < 3; ++j) {
-      cv::Mat channel(height, width, CV_32FC1, data);
-      (*wrappedImages)[i].push_back(channel);
-      data += width * height;
+    for (int j = 0; j < channels; ++j) {
+      if (FLAGS_yuv) {
+        cv::Mat channel(height, width, CV_8UC1, reinterpret_cast<char*>(data));
+        (*wrappedImages)[i].push_back(channel);
+        data += width * height / 4;
+      } else {
+        cv::Mat channel(height, width, CV_32FC1, data);
+        (*wrappedImages)[i].push_back(channel);
+        data += width * height;
+      }
     }
   }
 }
 
 void DataProvider::Preprocess(const vector<cv::Mat>& sourceImages,
                               vector<vector<cv::Mat>>* destImages) {
-  /* Convert the input image to the input image format of the network. */
+  // Convert the input image to the input image format of the network.
   CHECK(sourceImages.size() == destImages->size())
       << "Size of sourceImages and destImages doesn't match";
   for (int i = 0; i < sourceImages.size(); ++i) {
+    if (FLAGS_yuv) {
+      cv::Mat sample_yuv;
+      sourceImages[i].convertTo(sample_yuv, CV_8UC1);
+      cv::split(sample_yuv, (*destImages)[i]);
+      continue;
+    }
     cv::Mat sample;
     int num_channels_ = inferencer_->c();
-    cv::Size input_geometry;
-    input_geometry = cv::Size(inferencer_->h(), inferencer_->w());  // 416*416
-    if (sourceImages[i].channels() == 3 && inChannel_ == 1)
+    if (sourceImages[i].channels() == 3 && num_channels_ == 1)
       cv::cvtColor(sourceImages[i], sample, cv::COLOR_BGR2GRAY);
-    else if (sourceImages[i].channels() == 4 && inChannel_ == 1)
+    else if (sourceImages[i].channels() == 4 && num_channels_ == 1)
       cv::cvtColor(sourceImages[i], sample, cv::COLOR_BGRA2GRAY);
-    else if (sourceImages[i].channels() == 4 && inChannel_ == 3)
+    else if (sourceImages[i].channels() == 4 && num_channels_ == 3)
       cv::cvtColor(sourceImages[i], sample, cv::COLOR_BGRA2BGR);
-    else if (sourceImages[i].channels() == 1 && inChannel_ == 3)
+    else if (sourceImages[i].channels() == 1 && num_channels_ == 3)
       cv::cvtColor(sourceImages[i], sample, cv::COLOR_GRAY2BGR);
+    else if (sourceImages[i].channels() == 3 && num_channels_ == 4)
+      cv::cvtColor(sourceImages[i], sample, cv::COLOR_BGR2BGRA);
+    else if (sourceImages[i].channels() == 1 && num_channels_ == 4)
+      cv::cvtColor(sourceImages[i], sample, cv::COLOR_GRAY2BGRA);
     else
       sample = sourceImages[i];
 
     // 2.resize the image
     cv::Mat sample_temp;
     int input_dim = inferencer_->h();
-    cv::Mat sample_resized(input_dim, input_dim, CV_8UC3,
+    cv::Mat sample_resized(input_dim, input_dim, CV_8UC4,
                            cv::Scalar(128, 128, 128));
-    if (sample.size() != input_geometry) {
-      // resize
+    if (sample.size() != inGeometry_) {
+      // resize the raw picture and copyTo the center of a 416*416 backgroud
+      // feature map
       float img_w = sample.cols;
       float img_h = sample.rows;
       int new_w = static_cast<int>(
@@ -864,36 +549,31 @@ void DataProvider::Preprocess(const vector<cv::Mat>& sourceImages,
     } else {
       sample_resized = sample;
     }
-
-    // 3.BGR->RGB
+    // 3.BGR(A)->RGB(A)
     cv::Mat sample_rgb;
-    cv::cvtColor(sample_resized, sample_rgb, cv::COLOR_BGR2RGB);
+    if (num_channels_ == 4)
+      cv::cvtColor(sample_resized, sample_rgb, cv::COLOR_BGRA2RGBA);
+    else
+      cv::cvtColor(sample_resized, sample_rgb, cv::COLOR_BGR2RGB);
+
     // 4.convert to float
     cv::Mat sample_float;
     if (num_channels_ == 3)
-      // 1/255.0
       sample_rgb.convertTo(sample_float, CV_32FC3, 1);
+    else if (num_channels_ == 4)
+      sample_rgb.convertTo(sample_float, CV_32FC4, 1);
     else
-      sample_rgb.convertTo(sample_float, CV_32FC1, 1);
-
-    cv::Mat sampleNormalized;
-    bool int8 = (FLAGS_int8 != -1) ? FLAGS_int8 : FLAGS_fix8;
-    if ((int8) || (FLAGS_meanvalue.empty() && FLAGS_meanfile.empty())) {
-      sampleNormalized = sample_float;
-    } else {
-      cv::subtract(sample_float, mean_, sampleNormalized);
-      if (FLAGS_scale != 1) {
-        sampleNormalized *= FLAGS_scale;
-      }
-    }
-    /* This operation will write the separate BGR planes directly to the
-     * input layer of the network because it is wrapped by the cv::Mat
-     * objects in input_channels. */
-    cv::split(sampleNormalized, (*destImages)[i]);
+      sample_resized.convertTo(sample_float, CV_32FC1, 1);
+    // This operation will write the separate BGR planes directly to the
+    // input layer of the network because it is wrapped by the cv::Mat
+    // objects in input_channels. */
+    cv::split(sample_float, (*destImages)[i]);
   }
 }
 
 void DataProvider::SetMean(const string& meanFile, const string& meanValue) {
+  if (FLAGS_yuv) return;
+  if (FLAGS_meanfile.empty() && FLAGS_meanvalue.empty()) return;
   cv::Scalar channel_mean;
   if (!meanValue.empty()) {
     if (!meanFile.empty()) {
@@ -920,101 +600,92 @@ void DataProvider::SetMean(const string& meanFile, const string& meanValue) {
     }
     cv::merge(channels, mean_);
   } else {
-    LOG(INFO) << "Cannot support mean file";
+    LOG(WARNING) << "Cannot support mean file";
   }
 }
 
-Inferencer::Inferencer(const string& offlinemodel, const int& dp,
-                       const int& deviceId, const int& devicesize) {
-  modelParallel_ = 1;
-  deviceId_ = deviceId;
-  deviceSize_ = devicesize;
-  inferencingTime_ = 0;
-  // 1. set current device
-  setDeviceId(deviceId_);
-  // 2. load model and get function
-  LOG(INFO) << "load file: " << offlinemodel.c_str();
-  cnrtLoadModel(&model_, offlinemodel.c_str());
-  int mp;
-  cnrtQueryModelParallelism(model_, &mp);
-  if (FLAGS_dataparallel * mp <= 32) {
-    dataParallel_ = dp;
-    modelParallel_ = mp;
-  } else {
-    dataParallel_ = 1;
-    modelParallel_ = 1;
-    LOG(ERROR)
-        << "dataparallel * modelparallel should <= 32, changed them to 1";
-  }
-  const string name = "subnet0";
-  cnrtCreateFunction(&function_);
-  cnrtExtractFunction(&function_, model_, name.c_str());
+Inferencer::Inferencer(const cnrtRuntimeContext_t rt_ctx, const int& id)
+    : simple_flag_(true) {
+  this->rt_ctx_ = rt_ctx;
+  this->threadId_ = id;
+  this->inferencingTime_ = 0;
 
-  // 3. get function's I/O DataDesc
-  cnrtGetInputDataDesc(&inDescs_, &inBlobNum_, function_);
-  cnrtGetOutputDataDesc(&outDescs_, &outBlobNum_, function_);
-#if !defined(CROSS_COMPILE) && !defined(CROSS_COMPILE_ARM64)
-  uint64_t stack_size;
-  cnrtQueryModelStackSize(model_, &stack_size);
-  unsigned int current_device_size;
-  cnrtGetStackMem(&current_device_size);
-  if (stack_size > current_device_size) {
-    cnrtSetStackMem(stack_size + 50);
-  }
-#endif  // CROSS_COMPILE && CROSS_COMPILE_ARM64
-  // 4. allocate I/O data space on CPU memory and prepare Input data
-  int in_count;
+  cnrtGetRuntimeContextInfo(rt_ctx, CNRT_RT_CTX_FUNCTION,
+                            reinterpret_cast<void**>(&this->function_));
+  cnrtGetRuntimeContextInfo(rt_ctx, CNRT_RT_CTX_MODEL_PARALLEL,
+                            reinterpret_cast<void**>(&this->parallel_));
+  cnrtGetRuntimeContextInfo(rt_ctx, CNRT_RT_CTX_DEV_ORDINAL,
+                            reinterpret_cast<void**>(&this->deviceId_));
 
+  getIODataDesc();
+}
+// get function's I/O DataDesc,
+// allocate I/O data space on CPU memory and prepare Input data;
+void Inferencer::getIODataDesc() {
+  CNRT_CHECK(cnrtGetInputDataSize(&inputSizeArray_,
+        &inBlobNum_, function_));
+  CNRT_CHECK(cnrtGetOutputDataSize(&outputSizeArray_,
+        &outBlobNum_, function_));
+  CNRT_CHECK(cnrtGetInputDataType(&inputDataTypeArray_,
+        &inBlobNum_, function_));
+  CNRT_CHECK(cnrtGetOutputDataType(&outputDataTypeArray_,
+        &outBlobNum_, function_));
   LOG(INFO) << "input blob num is " << inBlobNum_;
+
+  inCounts_.resize(inBlobNum_, 1);
+  outCounts_.resize(outBlobNum_, 1);
+  inDimNums_.resize(inBlobNum_, 0);
+  outDimNums_.resize(outBlobNum_, 0);
+  inDimValues_.resize(inBlobNum_, nullptr);
+  outDimValues_.resize(outBlobNum_, nullptr);
+
   for (int i = 0; i < inBlobNum_; i++) {
-    unsigned int inN, inC, inH, inW;
-    cnrtDataDesc_t desc = inDescs_[i];
-    cnrtGetHostDataCount(desc, &in_count);
-    cnrtSetHostDataLayout(desc, CNRT_FLOAT32, CNRT_NCHW);
-    cnrtGetDataShape(desc, &inN, &inC, &inH, &inW);
-    in_count *= dataParallel_;
-    inN *= dataParallel_;
-    LOG(INFO) << "shape " << inN;
-    LOG(INFO) << "shape " << inC;
-    LOG(INFO) << "shape " << inH;
-    LOG(INFO) << "shape " << inW;
+    CNRT_CHECK(cnrtGetInputDataShape(&(inDimValues_[i]),
+        &(inDimNums_[i]), i, function_));
+    for (int j = 0; j < inDimNums_[i]; ++j) {
+      this->inCounts_[i] *= inDimValues_[i][j];
+      LOG(INFO) << "shape " << inDimValues_[i][j];
+    }
     if (i == 0) {
-      inNum_ = inN;
-      inChannel_ = inC;
-      inWidth_ = inW;
-      inHeight_ = inH;
-    } else {
-      cnrtGetHostDataCount(desc, &in_count);
+      inNum_ = inDimValues_[i][0];
+      inChannel_ = inDimValues_[i][3];
+      inWidth_ = inDimValues_[i][1];
+      inHeight_ = inDimValues_[i][2];
     }
   }
 
   for (int i = 0; i < outBlobNum_; i++) {
-    vector<int> shape;
-    cnrtDataDesc_t desc = outDescs_[i];
-    cnrtSetHostDataLayout(desc, CNRT_FLOAT32, CNRT_NCHW);
-    cnrtGetHostDataCount(desc, &outCount_[i]);
-    cnrtGetDataShape(desc, &outNum_[i], &outChannel_[i], &outHeight_[i],
-                     &outWidth_[i]);
-    outCount_[i] *= dataParallel_;
-    outNum_[i] *= dataParallel_;
-    shape.push_back(outNum_[i]);
-    shape.push_back(outChannel_[i]);
-    shape.push_back(outHeight_[i]);
-    shape.push_back(outWidth_[i]);
-    outputShape_.push_back(shape);
-    LOG(INFO) << "output shape " << outNum_[i];
-    LOG(INFO) << "output shape " << outChannel_[i];
-    LOG(INFO) << "output shape " << outHeight_[i];
-    LOG(INFO) << "output shape " << outWidth_[i];
+    CNRT_CHECK(cnrtGetOutputDataShape(&(outDimValues_[i]),
+        &(outDimNums_[i]), i, function_));
+    for (int j = 0; j < outDimNums_[i]; ++j) {
+      outCounts_[i] *= outDimValues_[i][j];
+      LOG(INFO) << "shape " << outDimValues_[i][j];
+    }
+    if (0 == i) {
+      outNum_ = outDimValues_[i][0];
+      outChannel_ = outDimValues_[i][3];
+      outHeight_ = outDimValues_[i][1];
+      outWidth_ = outDimValues_[i][2];
+    }
+    outCpuPtrs_.push_back(malloc(sizeof(float) * outCounts_[i]));
+    outSyncPtrs_.push_back(malloc(outputSizeArray_[i]));
   }
 }
 
 Inferencer::~Inferencer() {
   setDeviceId(deviceId_);
-  cnrtDestroyFunction(function_);
-  cnrtUnloadModel(model_);
-  for (auto ptr : inPtrVector_) cnrtFreeArray(ptr, inBlobNum_);
-  for (auto ptr : outPtrVector_) cnrtFreeArray(ptr, outBlobNum_);
+  for (int i = 0; i < outCpuPtrs_.size(); i++) {
+    if (outCpuPtrs_[i] != nullptr) {
+      free(outCpuPtrs_[i]);
+      outCpuPtrs_[i] = nullptr;
+    }
+  }
+  for (int i = 0; i < outSyncPtrs_.size(); i++) {
+    if (outSyncPtrs_[i] != nullptr) {
+      free(outSyncPtrs_[i]);
+      outSyncPtrs_[i] = nullptr;
+    }
+  }
 }
 
 void** Inferencer::popFreeInputData() { return freeInputFifo_.pop(); }
@@ -1041,125 +712,128 @@ void Inferencer::pushValidInputNames(vector<string> images) {
 
 vector<string> Inferencer::popValidInputNames() { return imagesFifo_.pop(); }
 
-void Inferencer::run() {
-  setDeviceId(deviceId_);
-  int channel = threadId_ / deviceSize_ % 4;
-  cnrtSetCurrentChannel((cnrtChannelType_t)channel);
+void Inferencer::pushValidInputDataAndNames(void** data, const vector<string>& images) {
+  std::lock_guard<std::mutex> lk(infr_mutex_);
+  pushValidInputData(data);
+  pushValidInputNames(images);
+}
 
-  cnrtFunction_t func;
-  cnrtCreateFunction(&func);
-  cnrtCopyFunction(&func, function_);
+void Inferencer::simpleRun() {
+// #define PINGPONG
+#ifdef PINGPONG
+#define RES_SIZE 2
+#else
+#define RES_SIZE 1
+#endif
 
-  // initialize function memory
-  cnrtInitFuncParam_t initFuncParam;
-  bool muta = false;
-  int data_parallel = dataParallel_;
-  uint32_t affinity = 0x01;
-  initFuncParam.muta = &muta;
-  initFuncParam.affinity = &affinity;
-  initFuncParam.data_parallelism = &data_parallel;
-  initFuncParam.end = CNRT_PARAM_END;
-  cnrtInitFunctionMemory_V2(func, &initFuncParam);
+  // set device to runtime context binded device
+  cnrtSetCurrentContextDevice(rt_ctx_);
 
-  CHECK(cnrtCreateQueue(&queue_) == CNRT_RET_SUCCESS)
-      << "CNRT create queue error, thread_id " << threadId_;
+  cnrtQueue_t queue[RES_SIZE];
+  cnrtNotifier_t notifierBeginning[RES_SIZE];
+  cnrtNotifier_t notifierEnd[RES_SIZE];
 
-  //  create start_event and end_event
-  cnrtNotifier_t notifierBeginning, notifierEnd;
-  cnrtCreateNotifier(&notifierBeginning);
-  cnrtCreateNotifier(&notifierEnd);
-  float eventInterval;
+  for (int i = 0; i < RES_SIZE; i++) {
+    CHECK(cnrtCreateQueue(&queue[i]) == CNRT_RET_SUCCESS)
+        << "CNRT create queue error, thread_id " << threadId();
+    cnrtCreateNotifier(&notifierBeginning[i]);
+    cnrtCreateNotifier(&notifierEnd[i]);
+  }
+  float eventInterval[RES_SIZE] = {0};
+  void** mluInData[RES_SIZE];
+  void** mluOutData[RES_SIZE];
 
-  while (true) {
-    void** mluInData = validInputFifo_.pop();
-    if (mluInData == nullptr) break;  // no more images
-
-    void** mluOutData = freeOutputFifo_.pop();
-    void* param[inBlobNum_ + outBlobNum_];
-    for (int i = 0; i < inBlobNum_; i++) {
-      param[i] = mluInData[i];
+  auto do_pop = [&](int index, void** param) {
+    mluInData[index] = popValidInputData();
+    if (mluInData[index] == nullptr) return false;
+    mluOutData[index] = popFreeOutputData();
+    for (int i = 0; i < inBlobNum(); i++) {
+      param[i] = mluInData[index][i];
     }
-    for (int i = 0; i < outBlobNum_; i++) {
-      param[inBlobNum_ + i] = mluOutData[i];
+    for (int i = 0; i < outBlobNum(); i++) {
+      param[inBlobNum() + i] = mluOutData[index][i];
     }
-    cnrtDim3_t dim = {1, 1, 1};
-    cnrtInvokeFuncParam_t invokeFuncParam;
-    invokeFuncParam.data_parallelism = &data_parallel;
-    invokeFuncParam.affinity = &affinity;
-    invokeFuncParam.end = CNRT_PARAM_END;
-    cnrtFunctionType_t funcType = (cnrtFunctionType_t)0;
-#if defined(CROSS_COMPILE) || defined(CROSS_COMPILE_ARM64)
-    struct timeval tpend, tpstart;
-    gettimeofday(&tpstart, NULL);
-#endif
-    cnrtPlaceNotifier(notifierBeginning, queue_);
-    CNRT_CHECK(cnrtInvokeFunction_V2(func, dim, param, funcType, queue_,
-                                  &invokeFuncParam));
-    cnrtPlaceNotifier(notifierEnd, queue_);
-#if defined(CROSS_COMPILE) || defined(CROSS_COMPILE_ARM64)
-    gettimeofday(&tpend, NULL);
-#endif
-    if (cnrtSyncQueue(queue_) == CNRT_RET_SUCCESS) {
-      cnrtNotifierDuration(notifierBeginning, notifierEnd, &eventInterval);
-#if defined(CROSS_COMPILE) || defined(CROSS_COMPILE_ARM64)
-      eventInterval = 1000000 * (tpend.tv_sec - tpstart.tv_sec) +
-        tpend.tv_usec - tpstart.tv_usec;
-#endif
-      inferencingTime_ += eventInterval;
-      printfMluTime(eventInterval);
+
+    return true;
+  };
+
+  auto do_invoke = [&](int index, void** param) {
+    cnrtPlaceNotifier(notifierBeginning[index], queue[index]);
+    CNRT_CHECK(cnrtInvokeRuntimeContext(rt_ctx_, param, queue[index], nullptr));
+  };
+
+  auto do_sync = [&](int index) {
+    cnrtPlaceNotifier(notifierEnd[index], queue[index]);
+    if (cnrtSyncQueue(queue[index]) == CNRT_RET_SUCCESS) {
+      cnrtNotifierDuration(notifierBeginning[index], notifierEnd[index],
+                           &eventInterval[index]);
+      inferencingTime_ += eventInterval[index];
+      printfMluTime(eventInterval[index]);
     } else {
-      LOG(ERROR) << "SyncQueue error";
+      LOG(ERROR) << " SyncQueue error";
+    }
+    pushValidOutputData(mluOutData[index]);
+    pushFreeInputData(mluInData[index]);
+  };
+
+#ifdef PINGPONG
+  bool pong_valid = false;
+  while (true) {
+    void* param[inBlobNum() + outBlobNum()];
+
+    // pop - ping
+    if (do_pop(0, static_cast<void**>(param)) == false) {
+      if (pong_valid) do_sync(1);
+      break;
+    }
+    // invoke - ping
+    do_invoke(0, static_cast<void**>(param));
+
+    // sync - pong
+    if (pong_valid) do_sync(1);
+
+    // pop - pong
+    if (do_pop(1, static_cast<void**>(param)) == false) {
+      do_sync(0);
+      break;
     }
 
-    pushValidOutputData(mluOutData);
-    pushFreeInputData(mluInData);
+    // invoke - pong
+    do_invoke(1, static_cast<void**>(param));
+    pong_valid = true;
+
+    // sync - ping
+    do_sync(0);
   }
-
-  cnrtDestroyNotifier(&notifierBeginning);
-  cnrtDestroyNotifier(&notifierEnd);
-  pushValidOutputData(nullptr);  // tell postprocessor to exit
-}
-
-vector<vector<vector<float>>> PostProcessor::detectionOutput(float* conv13,
-                                                     float* conv26,
-                                                     float* conv52) {
-  vector<vector<int>> outputShape = inferencer_->outputshape();
-  int batches = inferencer_->n() / inferencer_->dataParallel();
-  outputShape[0][0] = outputShape[0][0] / inferencer_->dataParallel() / batches;
-  outputShape[1][0] = outputShape[1][0] / inferencer_->dataParallel() / batches;
-  outputShape[2][0] = outputShape[2][0] / inferencer_->dataParallel() / batches;
-
-  int singleCount13 = outputShape[0][1] * outputShape[0][2] * outputShape[0][3];
-  int singleCount26 = outputShape[1][1] * outputShape[1][2] * outputShape[1][3];
-  int singleCount52 = outputShape[2][1] * outputShape[2][2] * outputShape[2][3];
-
-  vector<vector<vector<float>>> final_boxes;
-  for (int m = 0; m < batches; m++) {
-    tensors.clear();
-    tensors.push_back(get_blob_data(outputShape[0], conv13 + m * singleCount13));
-    tensors.push_back(get_blob_data(outputShape[1], conv26 + m * singleCount26));
-    tensors.push_back(get_blob_data(outputShape[2], conv52 + m * singleCount52));
-
-    vector<vector<vector<float>>> three_boxes;
-    three_boxes.resize(3);
-    for (int i = 0; i < 3; i++) {
-      transform_tensor(tensors[i], &three_boxes[i], 80, x_y_offsets[i],
-                       anchor_tensors[i]);
+#else
+  while (true) {
+    void* param[inBlobNum() + outBlobNum()];
+    // pop - ping
+    if (do_pop(0, static_cast<void**>(param)) == false) {
+      break;
     }
-    vector<vector<float>> all_boxes, tmp_boxes;
-    // 10647*85
-    concatenate(&all_boxes, three_boxes[0], three_boxes[1], three_boxes[2]);
-    get_detection(all_boxes, &tmp_boxes, 80, FLAGS_confidence, FLAGS_nmsthresh);
-    final_boxes.push_back(tmp_boxes);
+    // invoke - ping
+    do_invoke(0, static_cast<void**>(param));
+
+    // sync - ping
+    do_sync(0);
   }
-  return final_boxes;
+#endif
+
+  for (int i = 0; i < RES_SIZE; i++) {
+    cnrtDestroyNotifier(&notifierBeginning[i]);
+    cnrtDestroyNotifier(&notifierEnd[i]);
+    cnrtDestroyQueue(queue[i]);
+  }
+
+  // tell postprocessor to exit
+  pushValidOutputData(nullptr);
 }
+
 
 void PostProcessor::run() {
   setDeviceId(deviceId_);
   Inferencer* infr = inferencer_;  // avoid line wrap
-  int channel = threadId_ / infr->deviceSize() % 4;
-  cnrtSetCurrentChannel((cnrtChannelType_t)channel);
 
   vector<string> labelNameMap;
   if (!FLAGS_labels.empty()) {
@@ -1171,74 +845,134 @@ void PostProcessor::run() {
     labels.close();
   }
 
-
-  outCpuPtrs_ = new void*[3];
-  outCpuPtrs_[0] = new float[infr->outCount()[0]];
-  outCpuPtrs_[1] = new float[infr->outCount()[1]];
-  outCpuPtrs_[2] = new float[infr->outCount()[2]];
-
-  vector<int> size_row = {507, 2028, 8112};
-  vector<string> anchor_str = {"13", "26", "52"};
-  x_y_offsets.push_back(vector<vector<float>>(507, vector<float>(2)));
-  x_y_offsets.push_back(vector<vector<float>>(2028, vector<float>(2)));
-  x_y_offsets.push_back(vector<vector<float>>(8112, vector<float>(2)));
-  anchor_tensors.push_back(vector<vector<float>>(507, vector<float>(2)));
-  anchor_tensors.push_back(vector<vector<float>>(2028, vector<float>(2)));
-  anchor_tensors.push_back(vector<vector<float>>(8112, vector<float>(2)));
-
-  readtxt(&x_y_offsets, &anchor_tensors, size_row, anchor_str);
-
+  int TASK_NUM = SimpleInterface::thread_num;
+  std::vector<std::future<void>> futureVector;
   while (true) {
     void** mluOutData = infr->popValidOutputData();
     if (nullptr == mluOutData) break;  // no more data to process
-    CNRT_CHECK(cnrtMemcpyBatchByDescArray(
-        outCpuPtrs_, mluOutData, infr->outDescs(), infr->outBlobNum(),
-        infr->dataParallel(), CNRT_MEM_TRANS_DIR_DEV2HOST));
+
+    CNRT_CHECK(cnrtMemcpy(reinterpret_cast<void*>(infr->outSyncPtrs_[0]),
+                          mluOutData[0],
+                          infr->outputSizeArray()[0],
+                          CNRT_MEM_TRANS_DIR_DEV2HOST));
+    cnrtDataType_t cpuDtype = CNRT_FLOAT32;
+    cnrtDataType_t mluDtype = infr->outputDataTypeArray()[0];
+    int dimValuesMlu[4] = {infr->outDimValues()[0][0], infr->outDimValues()[0][1],
+                           infr->outDimValues()[0][2], infr->outDimValues()[0][3]};
+    int dimOrder[4] = {0, 3, 1, 2};  // NHWC --> NCHW
+    if (cpuDtype != mluDtype) {
+      CNRT_CHECK(cnrtTransOrderAndCast(reinterpret_cast<void*>(infr->outSyncPtrs_[0]),
+                                       mluDtype,
+                                       reinterpret_cast<void*>(infr->outCpuPtrs_[0]),
+                                       cpuDtype,
+                                       nullptr,
+                                       4,
+                                       dimValuesMlu,
+                                       dimOrder));
+    } else {
+      CNRT_CHECK(cnrtTransDataOrder(infr->outSyncPtrs_[0],
+                                    mluDtype,
+                                    infr->outCpuPtrs_[0],
+                                    4,
+                                    dimValuesMlu,
+                                    dimOrder));
+    }
     infr->pushFreeOutputData(mluOutData);
 
-    int batches = inferencer_->n() / inferencer_->dataParallel();
-    vector<vector<vector<float>>> final_boxes;
-    vector<vector<vector<vector<float>>>> boxes(infr->dataParallel());
-    float* outData0 = reinterpret_cast<float*>(outCpuPtrs_[0]);
-    float* outData1 = reinterpret_cast<float*>(outCpuPtrs_[1]);
-    float* outData2 = reinterpret_cast<float*>(outCpuPtrs_[2]);
-    for (int dp = 0; dp < infr->dataParallel(); dp++) {
-      boxes[dp] = detectionOutput(
-          outData0 + (dp * infr->outCount()[0] / infr->dataParallel()),
-          outData1 + (dp * infr->outCount()[1] / infr->dataParallel()),
-          outData2 + (dp * infr->outCount()[2] / infr->dataParallel()));
-    }
-    for (int dp = 0; dp < infr->dataParallel(); dp++) {
-      for (int batch = 0; batch < batches; batch++) {
-          final_boxes.push_back(boxes[dp][batch]);
-      }
-    }
-    vector<string> origin_img = infr->popValidInputNames();
-    vector<cv::Mat> imgs;
-    vector<string> img_names;
-    for (auto img_name : origin_img) {
-      if (img_name != "null") {
-        cv::Mat img = cv::imread(img_name, -1);
-        int pos = img_name.find_last_of('/');
-        string file_name(img_name.substr(pos + 1));
-        imgs.push_back(img);
-        img_names.push_back("yolov3_offline_" + file_name);
-      }
-    }
     Timer dumpTimer;
-    if (FLAGS_dump)
-      WriteVisualizeBBox_offline(imgs, final_boxes, labelNameMap, img_names,
-                                 infr->h());
+    if (FLAGS_dump) {
+      vector<vector<vector<float>>> final_boxes;
+      float* outputData = reinterpret_cast<float*>(infr->outCpuPtrs_[0]);
+      float max_limit = 1;
+      float min_limit = 0;
+      int batchSize = infr->outDimValues()[0][0];
+      int count = infr->outDimValues()[0][3];
+
+      for (int i = 0; i < batchSize; i++) {
+        int num_boxes = static_cast<int>(outputData[i * count]);
+        if (num_boxes > 1024) {
+            LOG(INFO) << "num_boxes : " << num_boxes;
+            num_boxes = 1024;
+        }
+        vector<vector<float>> batch_box;
+        for (int k = 0; k < num_boxes; k++) {
+          int index = i * count + 64 + k * 7;
+          vector<float> single_box;
+          float bl = std::max(
+              min_limit, std::min(max_limit, outputData[index + 3]));  // x1
+          float br = std::max(
+              min_limit, std::min(max_limit, outputData[index + 5]));  // x2
+          float bt = std::max(
+              min_limit, std::min(max_limit, outputData[index + 4]));  // y1
+          float bb = std::max(
+              min_limit, std::min(max_limit, outputData[index + 6]));  // y2
+          single_box.push_back(bl);
+          single_box.push_back(bt);
+          single_box.push_back(br);
+          single_box.push_back(bb);
+          single_box.push_back(outputData[index + 2]);
+          single_box.push_back(outputData[index + 1]);
+          if ((br - bl) > 0 && (bb - bt) > 0) {
+            batch_box.push_back(single_box);
+          }
+        }
+        final_boxes.push_back(batch_box);
+      }
+
+      vector<string> origin_img = infr->popValidInputNames();
+      vector<cv::Mat> imgs;
+      vector<string> img_names;
+      for (auto img_name : origin_img) {
+        if (img_name != "null") {
+          cv::Mat img;
+          if (FLAGS_yuv) {
+            cv::Size size = cv::Size(infr->w(), infr->h());
+            img = yuv420sp2Bgr24(convertYuv2Mat(img_name, size));
+          } else {
+            img = cv::imread(img_name, -1);
+          }
+          imgs.push_back(img);
+          img_names.push_back(img_name);
+        }
+      }
+      int input_dim = FLAGS_yuv ? 416 : infr->h();
+      const int size = imgs.size();
+      if (TASK_NUM > size) TASK_NUM = size;
+      const int delta = size / TASK_NUM;
+      int from = 0;
+      int to = delta;
+      for (int i = 0; i < TASK_NUM; i++) {
+        from = delta * i;
+        if (i == TASK_NUM - 1) {
+          to = size;
+        } else {
+          to = delta * (i + 1);
+        }
+        auto func = tp_->add(
+            [](const vector<cv::Mat>& imgs,
+              const vector<vector<vector<float>>>& final_boxes,
+              const vector<string>& labelNameMap,
+              const vector<string>& img_names, const int input_dim,
+              const int& from, const int& to) {
+            WriteVisualizeBBox_offline(imgs, final_boxes, labelNameMap,
+                img_names, input_dim, from, to); },
+            imgs, final_boxes, labelNameMap, img_names, input_dim, from, to);
+        futureVector.push_back(std::move(func));
+      }
+    }
     dumpTimer.log("dump imgs time ...");
+  }
+  for (int i = 0; i < futureVector.size(); i++) {
+    futureVector[i].get();
   }
 }
 
 class Pipeline {
   public:
   Pipeline(const string& offlinemodel, const string& meanFile,
-           const string& meanValue, const int& id,
-           const int& deviceId, const int& devicesize,
-           const int& dataparallel, queue<string> images);
+           const string& meanValue, const int& id, const int& deviceId,
+           const int& devicesize,
+           const vector<queue<string>>& images);
   ~Pipeline();
   void run();
   inline DataProvider* dataProvider() { return data_provider_; }
@@ -1246,45 +980,81 @@ class Pipeline {
   inline PostProcessor* postProcessor() { return postProcessor_; }
 
   private:
+  vector<DataProvider*> data_providers_;
   DataProvider* data_provider_;
   Inferencer* inferencer_;
   PostProcessor* postProcessor_;
 };
-
 Pipeline::Pipeline(const string& offlinemodel, const string& meanFile,
-                   const string& meanValue, const int& id,
-                   const int& deviceId, const int& devicesize,
-                   const int& dataparallel, queue<string> images) {
-  inferencer_ = new Inferencer(offlinemodel, dataparallel, deviceId, devicesize);
-  data_provider_ = new DataProvider(meanFile, meanValue, deviceId, images);
+                   const string& meanValue, const int& id, const int& deviceId,
+                   const int& devicesize,
+                   const vector<queue<string>>& images)
+    : data_providers_(SimpleInterface::data_provider_num_),
+      data_provider_(nullptr),
+      inferencer_(nullptr),
+      postProcessor_(nullptr) {
+  auto& simpleInterface = SimpleInterface::getInstance();
+  auto dev_runtime_contexts = simpleInterface.get_runtime_contexts();
+  inferencer_ = new Inferencer(dev_runtime_contexts[id % devicesize], id);
   postProcessor_ = new PostProcessor(deviceId);
 
-  data_provider_->setInferencer(inferencer_);
   postProcessor_->setInferencer(inferencer_);
-  inferencer_->setPostProcessor(postProcessor_);
-
-  data_provider_->setThreadId(id);
   postProcessor_->setThreadId(id);
+  inferencer_->setPostProcessor(postProcessor_);
   inferencer_->setThreadId(id);
 
+  int data_provider_num = SimpleInterface::data_provider_num_;
+  for (int i = 0; i < data_provider_num; i++) {
+    data_providers_[i] = new DataProvider(meanFile, meanValue, deviceId,
+        images[data_provider_num * id + i]);
+    data_providers_[i]->setInferencer(inferencer_);
+    data_providers_[i]->setThreadId(id);
 #ifdef PRE_READ
-  data_provider_->preRead();
+    data_providers_[i]->preRead();
 #endif
+  }
 }
 
 Pipeline::~Pipeline() {
-  delete inferencer_;
-  delete data_provider_;
-  delete postProcessor_;
+  for (auto data_provider : data_providers_) {
+    delete data_provider;
+  }
+
+  if (inferencer_) {
+    delete inferencer_;
+  }
+
+  if (postProcessor_) {
+    delete postProcessor_;
+  }
 }
 
 void Pipeline::run() {
-  vector<thread*> threads(3, nullptr);
-  threads[0] = new thread(&DataProvider::run, data_provider_);
-  threads[1] = new thread(&Inferencer::run, inferencer_);
-  threads[2] = new thread(&PostProcessor::run, postProcessor_);
-  for (auto th : threads) th->join();
-  for (auto th : threads) delete th;
+  int data_provider_num = 1;
+  data_provider_num = data_providers_.size();
+  vector<thread*> threads(data_provider_num + 2, nullptr);
+
+  for (int i = 0; i < data_provider_num; i++) {
+    threads[i] = new thread(&DataProvider::run, data_providers_[i]);
+  }
+  threads[data_provider_num] =
+      new thread(&Inferencer::simpleRun, inferencer_);
+  threads[data_provider_num + 1] =
+      new thread(&PostProcessor::run, postProcessor_);
+
+  for (int i = 0; i < data_provider_num; i++) {
+    threads[i]->join();
+    delete threads[i];
+  }
+
+  // push a nullptr for simple compile when the thread of data provider finished
+  // tasks
+  inferencer_->pushValidInputData(nullptr);
+
+  for (int i = 0; i < 2; i++) {
+    threads[data_provider_num + i]->join();
+    delete threads[data_provider_num + i];
+  }
 }
 
 int main(int argc, char* argv[]) {
@@ -1307,6 +1077,13 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
+  auto& simpleInterface = SimpleInterface::getInstance();
+  // if simple_compile option has been specified to 1 by user, simple compile
+  // thread);
+  int provider_num = 1;
+  simpleInterface.setFlag(true);
+  provider_num = SimpleInterface::data_provider_num_;
+
   if (FLAGS_logdir != "") {
     FLAGS_log_dir = FLAGS_logdir;
   } else {
@@ -1327,7 +1104,7 @@ int main(int argc, char* argv[]) {
   int imageNum = 0;
   vector<string> files;
   std::string line_tmp;
-  vector<queue<string>> imageList(totalThreads);
+  vector<queue<string>> imageList(totalThreads * provider_num);
   if (files_tmp.fail()) {
     LOG(ERROR) << "open " << FLAGS_images << " file fail!";
     return 1;
@@ -1341,17 +1118,22 @@ int main(int argc, char* argv[]) {
   LOG(INFO) << "there are " << imageNum << " figures in " << FLAGS_images;
 
   cnrtInit(0);
+  simpleInterface.loadOfflinemodel(FLAGS_offlinemodel, deviceIds_,
+      FLAGS_channel_dup);
+
   vector<thread*> stageThreads;
   vector<Pipeline*> pipelineVector;
   for (int i = 0; i < totalThreads; i++) {
-    if (imageList[i].size()) {
-      Pipeline* pipeline = new Pipeline(
-          FLAGS_offlinemodel, FLAGS_meanfile, FLAGS_meanvalue, i,
-          deviceIds_[i % deviceIds_.size()], deviceIds_.size(),
-          FLAGS_dataparallel, imageList[i]);
-      stageThreads.push_back(new thread(&Pipeline::run, pipeline));
-      pipelineVector.push_back(pipeline);
+    Pipeline* pipeline;
+    if (imageList.size()) {
+      pipeline =
+        new Pipeline(FLAGS_offlinemodel, FLAGS_meanfile,
+            FLAGS_meanvalue, i, deviceIds_[i % deviceIds_.size()],
+            deviceIds_.size(), imageList);
     }
+
+    stageThreads.push_back(new thread(&Pipeline::run, pipeline));
+    pipelineVector.push_back(pipeline);
   }
 
   float execTime;
@@ -1365,6 +1147,7 @@ int main(int argc, char* argv[]) {
   condition.notify_all();
   for (int i = 0; i < stageThreads.size(); i++) {
     stageThreads[i]->join();
+    delete stageThreads[i];
   }
   gettimeofday(&tpend, NULL);
   execTime = 1000000 * (tpend.tv_sec - tpstart.tv_sec) + tpend.tv_usec -
@@ -1374,18 +1157,25 @@ int main(int argc, char* argv[]) {
   for (int i = 0; i < pipelineVector.size(); i++) {
     mluTime += pipelineVector[i]->inferencer()->inferencingTime();
   }
-  printPerf(imageNum, execTime, mluTime, totalThreads);
+
+  /*  LOG(INFO) << "Hardware fps: " << imageNum / mluTime * totalThreads * 1e6;
+    LOG(INFO) << "End2end throughput fps: " << imageNum / execTime * 1e6; */
+  int batchsize = pipelineVector[0]->inferencer()->n();
+  printPerf(imageNum, execTime, mluTime, totalThreads, batchsize);
+  saveResult(imageNum, (-1), (-1), (-1), mluTime, execTime, totalThreads, batchsize);
+
 
   for (auto iter : pipelineVector) {
     if (iter != nullptr) {
       delete iter;
     }
   }
+  simpleInterface.destroyRuntimeContext();
   cnrtDestroy();
 }
 
 #else
-#include <glog/logging.h>
+#include "caffe/common.hpp"
 int main(int argc, char* argv[]) {
   LOG(FATAL) << "This program should be compiled with the defintion"
              << " of both USE_MLU and USE_OPENCV!";

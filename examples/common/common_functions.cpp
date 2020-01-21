@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -26,6 +26,11 @@ CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-local-typedefs"
+#include <boost/property_tree/json_parser.hpp>
+#pragma GCC diagnostic pop
+#include <boost/property_tree/ptree.hpp>
 #include <opencv2/core/core.hpp>
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
@@ -41,23 +46,98 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 using std::vector;
 using std::string;
+using namespace boost::property_tree;  // NOLINT(build/namespaces)
 
 void printfMluTime(float mluTime) {
-    LOG(INFO) << " execution time: " << mluTime;
+  LOG(INFO) << " execution time: " << mluTime;
 }
 
 void printfAccuracy(int imageNum, float acc1, float acc5) {
   LOG(INFO) << "Global accuracy : ";
-  LOG(INFO) << "accuracy1: " << 1.0 * acc1 / imageNum << " ("
+  LOG(INFO) << "top1: " << 1.0 * acc1 / imageNum << " ("
     << acc1 << "/" << imageNum << ")";
-  LOG(INFO) << "accuracy5: " << 1.0 * acc5 / imageNum << " ("
+  LOG(INFO) << "top5: " << 1.0 * acc5 / imageNum << " ("
     << acc5 << "/" << imageNum << ")";
 }
 
-void printPerf(int imageNum, float execTime, float mluTime, int threads) {
-  float hardwareFps = imageNum / mluTime * threads * 1e6;
-  LOG(INFO) << "Hardware fps: " << hardwareFps;
-  LOG(INFO) << "End2end throughput fps: " << imageNum / execTime * 1e6;
+// Usage:
+//      if thread is not needed, pass 1
+//      batchsize is needed to calculate latency
+void printPerf(int imageNum, float execTime, float mluTime, int threads, int batchsize) {
+  int parallel_num = (threads > 32) ? 32 : threads;
+  float hardwareFps = imageNum / mluTime * parallel_num * 1e6;
+  float latency = -1;
+  latency = (float)(float(mluTime)/float(imageNum))*batchsize;   // us
+  LOG(INFO) << "throughput: " << hardwareFps;
+  if (getenv("OUTPUT_E2E") != NULL && getenv("OUTPUT_E2E")[0] == 'O' && getenv("OUTPUT_E2E")[1] == 'N'){
+      LOG(INFO) << "End2end throughput fps: " << imageNum / execTime * 1e6;
+  }
+  LOG(INFO) << "Latency: " << float2string(latency);
+}
+string float2string(float value) {
+  std::stringstream strstream;
+  strstream.setf(std::ios::fixed);
+  strstream.precision(2);
+  strstream << value;
+  return strstream.str();
+}
+
+void saveResult(int imageNum, float top1, float top5, float meanAp,
+    float hardwaretime, float endToEndTime, int threads, int batchsize) {
+  if (getenv("OUTPUT_JSON_FILE") == NULL) return;
+  string file = getenv("OUTPUT_JSON_FILE");
+  float hardwareFps = (-1);
+  float endToEndFps = (-1);
+  int parallel_num;
+  if (hardwaretime != (-1)) {
+    parallel_num = (threads > 32) ? 32 : threads;
+    hardwaretime = hardwaretime * batchsize / imageNum;
+    hardwareFps = batchsize / hardwaretime * parallel_num * 1e6;
+  } else {
+    hardwareFps = (-1);
+  }
+
+  if (endToEndTime != (-1)) {
+    endToEndFps = imageNum /endToEndTime * 1e6;
+  } else {
+    endToEndFps = (-1);
+  }
+
+  if (top1 != (-1)) {
+    top1 = (1.0 * top1 / imageNum) * 100;
+  } else {
+    top1 = (-1);
+  }
+
+  if (top5 != (-1)) {
+    top5 = (1.0 * top5 / imageNum) * 100;
+  } else {
+    top5 = (-1);
+  }
+
+  ptree output, output_list, accuracy, performance;
+  accuracy.put("top1", float2string(top1));
+  accuracy.put("top5", float2string(top5));
+  accuracy.put("meanAp", float2string(meanAp));
+
+  performance.put("hardwaretime", float2string(hardwaretime));
+  performance.put("hardwareFps", float2string(hardwareFps));
+  performance.put("endToEndTime", float2string(endToEndTime));
+  performance.put("endToEndFps", float2string(endToEndFps));
+
+  output_list.put_child("accuracy", accuracy);
+  output_list.put_child("performance", performance);
+  output.put_child("output", output_list);
+  std::stringstream ss;
+  write_json(ss, output);
+  std::ofstream fout;
+  fout.open(file);
+  if (fout) {
+    fout << ss.str() <<std::endl;
+  } else {
+    LOG(INFO) << "file open failed!";
+  }
+  fout.close();
 }
 
 vector<int> getTop5(vector<string> labels, string image, float* data, int count) {
@@ -95,6 +175,16 @@ void readYUV(string name, cv::Mat img, int h, int w) {
   fin.close();
 }
 
+cv::Mat readImage(string name, cv::Size size, bool yuvImg) {
+  cv::Mat image;
+  if (yuvImg) {
+    image = convertYuv2Mat(name, size);
+  } else {
+    image = cv::imread(name, -1);
+  }
+  return image;
+}
+
 cv::Mat yuv420sp2Bgr24(cv::Mat yuv_image) {
     cv::Mat bgr_image(yuv_image.rows / 3 * 2,
         yuv_image.cols, CV_8UC3);
@@ -111,4 +201,28 @@ cv::Mat convertYuv2Mat(string img_name, cv::Size inGeometry) {
 cv::Mat convertYuv2Mat(string img_name, int width, int height) {
   cv::Size inGeometry_(width, height);
   return convertYuv2Mat(img_name, inGeometry_);
+}
+
+vector<int> to_cpu_shape(const vector<int>& mlu_shape) {
+  // shape: N(D)HWC --> NC(D)HW
+  vector<int> cpu_shape(mlu_shape.size(), 1);
+  int channel = mlu_shape[mlu_shape.size() - 1];
+  for (int i = 2; i < mlu_shape.size(); i++) {
+    cpu_shape[i] = mlu_shape[i - 1];
+  }
+  cpu_shape[0] = mlu_shape[0];
+  cpu_shape[1] = channel;
+  return cpu_shape;
+}
+
+vector<int> to_mlu_shape(const vector<int>& cpu_shape) {
+  // shape : NC(D)HW --> N(D)HWC
+  vector<int> mlu_shape(cpu_shape.size(), 1);
+  int channel = cpu_shape[1];
+  for (int i = 1; i < cpu_shape.size() - 1; i++) {
+    mlu_shape[i] = cpu_shape[i + 1];
+  }
+  mlu_shape[0] = cpu_shape[0];
+  mlu_shape[mlu_shape.size() - 1] = channel;
+  return mlu_shape;
 }

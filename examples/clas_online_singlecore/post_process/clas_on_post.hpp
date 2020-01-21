@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -29,14 +29,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #ifndef EXAMPLES_CLAS_ONLINE_SINGLECORE_POST_PROCESS_CLAS_ON_POST_HPP_
 #define EXAMPLES_CLAS_ONLINE_SINGLECORE_POST_PROCESS_CLAS_ON_POST_HPP_
-/*#include <vector>
-#include <string>
-#include <sstream>
-#include "glog/logging.h"
-
-using std::vector;
-using std::string;
-using std::stringstream;*/
 #include "clas_processor.hpp"
 
 // #define PRE_READ

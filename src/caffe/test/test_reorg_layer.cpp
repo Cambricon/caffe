@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -131,7 +131,7 @@ class MLUReorgLayerTest : public MLUDeviceTest<TypeParam> {
         blob_top_(new Blob<Dtype>()) {
     // fill the values
     FillerParameter filler_param;
-    GaussianFiller<Dtype> filler(filler_param);
+    ConstantFiller<Dtype> filler(filler_param);
     filler.Fill(this->blob_bottom_);
     blob_bottom_vec_.push_back(blob_bottom_);
     blob_top_vec_.push_back(blob_top_);
@@ -167,10 +167,21 @@ TYPED_TEST(MLUReorgLayerTest, TestSetUp) {
   EXPECT_EQ(this->blob_top_->width(), 1);
 }
 
-TYPED_TEST(MLUReorgLayerTest, TestForward) {
+TYPED_TEST(MLUReorgLayerTest, TestForwardInt8) {
   typedef typename TypeParam::Dtype Dtype;
   LayerParameter layer_param;
   layer_param.mutable_reorg_param()->set_stride(1);
+  BlobDataType blob_dtype;  // set position
+  blob_dtype = get_quantized_info(*this->blob_bottom_,
+                                layer_param, "common", DT_INT8);
+  layer_param.add_bottom_mlu_dtype()->CopyFrom(blob_dtype);
+  int position = -3;  // set weight position
+  int scale = 1.5875;
+  BlobDataType blobs_dtype;
+  blobs_dtype.set_type(DT_INT8);
+  blobs_dtype.add_position(position);
+  blobs_dtype.add_scale(scale);
+  layer_param.add_blobs_dtype()->CopyFrom(blobs_dtype);
   MLUReorgLayer<Dtype> layer(layer_param);
   layer.SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
   layer.Reshape_dispatch(this->blob_bottom_vec_, this->blob_top_vec_);
@@ -190,10 +201,21 @@ TYPED_TEST(MLUReorgLayerTest, TestForward) {
   EVENT_TIME(layer.get_event_time());
 }
 
-TYPED_TEST(MLUReorgLayerTest, TestForwardStride) {
+TYPED_TEST(MLUReorgLayerTest, TestForwardStrideInt8) {
   typedef typename TypeParam::Dtype Dtype;
   LayerParameter layer_param;
   layer_param.mutable_reorg_param()->set_stride(2);
+  BlobDataType blob_dtype;  // set position
+  blob_dtype = get_quantized_info(*this->blob_bottom_,
+                                layer_param, "common", DT_INT8);
+  layer_param.add_bottom_mlu_dtype()->CopyFrom(blob_dtype);
+  int position = -3;  // set weight position
+  int scale = 1.5875;
+  BlobDataType blobs_dtype;
+  blobs_dtype.set_type(DT_INT8);
+  blobs_dtype.add_position(position);
+  blobs_dtype.add_scale(scale);
+  layer_param.add_blobs_dtype()->CopyFrom(blobs_dtype);
   MLUReorgLayer<Dtype> layer2(layer_param);
   layer2.SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
   layer2.Reshape_dispatch(this->blob_bottom_vec_, this->blob_top_vec_);
@@ -231,7 +253,7 @@ class MFUSReorgLayerTest : public MFUSDeviceTest<TypeParam> {
         blob_top_(new Blob<Dtype>()) {
     // fill the values
     FillerParameter filler_param;
-    GaussianFiller<Dtype> filler(filler_param);
+    ConstantFiller<Dtype> filler(filler_param);
     filler.Fill(this->blob_bottom_);
     blob_bottom_vec_.push_back(blob_bottom_);
     blob_top_vec_.push_back(blob_top_);
@@ -248,10 +270,21 @@ class MFUSReorgLayerTest : public MFUSDeviceTest<TypeParam> {
 
 TYPED_TEST_CASE(MFUSReorgLayerTest, TestMFUSDevices);
 
-TYPED_TEST(MFUSReorgLayerTest, TestForward) {
+TYPED_TEST(MFUSReorgLayerTest, TestForwardInt8) {
   typedef typename TypeParam::Dtype Dtype;
   LayerParameter layer_param;
   layer_param.mutable_reorg_param()->set_stride(1);
+  BlobDataType blob_dtype;  // set position
+  blob_dtype = get_quantized_info(*this->blob_bottom_,
+                                layer_param, "common", DT_INT8);
+  layer_param.add_bottom_mlu_dtype()->CopyFrom(blob_dtype);
+  int position = -3;  // set weight position
+  int scale = 1.5875;
+  BlobDataType blobs_dtype;
+  blobs_dtype.set_type(DT_INT8);
+  blobs_dtype.add_position(position);
+  blobs_dtype.add_scale(scale);
+  layer_param.add_blobs_dtype()->CopyFrom(blobs_dtype);
   MLUReorgLayer<Dtype> layer(layer_param);
   layer.SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
   ASSERT_TRUE(layer.mfus_supported());
@@ -279,10 +312,21 @@ TYPED_TEST(MFUSReorgLayerTest, TestForward) {
   ERR_RATE(err_sum/sum);
 }
 
-TYPED_TEST(MFUSReorgLayerTest, TestForwardStride) {
+TYPED_TEST(MFUSReorgLayerTest, TestForwardStrideInt8) {
   typedef typename TypeParam::Dtype Dtype;
   LayerParameter layer_param;
   layer_param.mutable_reorg_param()->set_stride(2);
+  BlobDataType blob_dtype;  // set position
+  blob_dtype = get_quantized_info(*this->blob_bottom_,
+                                layer_param, "common", DT_INT8);
+  layer_param.add_bottom_mlu_dtype()->CopyFrom(blob_dtype);
+  int position = -3;  // set weight position
+  int scale = 1.5875;
+  BlobDataType blobs_dtype;
+  blobs_dtype.set_type(DT_INT8);
+  blobs_dtype.add_position(position);
+  blobs_dtype.add_scale(scale);
+  layer_param.add_blobs_dtype()->CopyFrom(blobs_dtype);
   MLUReorgLayer<Dtype> layer2(layer_param);
   layer2.SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
 
@@ -296,8 +340,6 @@ TYPED_TEST(MFUSReorgLayerTest, TestForwardStride) {
   layer2.fuse(&fuser);
   fuser.compile();
   fuser.forward();
-
-
   vector<vector<int>> indexes = {
       {0, 0, 0, 0}, {0, 0, 1, 0}, {0, 2, 0, 0}, {0, 2, 1, 0}, {0, 0, 0, 1},
       {0, 0, 1, 1}, {0, 2, 0, 1}, {0, 2, 1, 1}, {0, 1, 0, 0}, {0, 1, 1, 0},

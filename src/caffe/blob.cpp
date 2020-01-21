@@ -2,7 +2,7 @@
 All modification made by Cambricon Corporation: © 2018--2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -53,10 +53,11 @@ Blob<Dtype>::Blob(const int num, const int channels, const int height,
 template <typename Dtype>
 Blob<Dtype>::Blob(const vector<int>& shape, BaseDataType cpu_type,
                   BaseDataType mlu_type, cnmlTensorType_t tensor_type,
-                  cnmlDataOrder_t shape_order)
+                  cnmlDataOrder_t shape_order,
+                  vector<int>* dim_strides)
     : capacity_(0),
       shape_order_(shape_order) {
-  Reshape(shape, cpu_type, mlu_type, tensor_type, shape_order);
+  Reshape(shape, cpu_type, mlu_type, tensor_type, shape_order, dim_strides);
 }
 
 template <typename Dtype>
@@ -74,22 +75,24 @@ void Blob<Dtype>::Reshape(const int num, const int channels, const int height,
 template <typename Dtype>
 void Blob<Dtype>::Reshape(const vector<int>& shape, BaseDataType cpu_type,
                           BaseDataType mlu_type, cnmlTensorType_t tensor_type,
-                          cnmlDataOrder_t shape_order) {
+                          cnmlDataOrder_t shape_order,
+                          vector<int>* dim_strides) {
   Reshape(shape);
-  mlu_tensor_desc_.remember(shape, tensor_type, cpu_type, mlu_type,
-                            shape_order);
+  tensor_desc_.remember(shape, tensor_type, cpu_type, mlu_type,
+                            shape_order, dim_strides);
 }
 
 template <typename Dtype>
 void Blob<Dtype>::Reshape(const BlobShape& shape, BaseDataType cpu_type,
                           BaseDataType mlu_type, cnmlTensorType_t tensor_type,
-                          cnmlDataOrder_t shape_order) {
+                          cnmlDataOrder_t shape_order,
+                          vector<int>* dim_strides) {
   CHECK_LE(shape.dim_size(), kMaxBlobAxes);
   vector<int> shape_vec(shape.dim_size());
   for (int i = 0; i < shape.dim_size(); ++i) {
     shape_vec[i] = shape.dim(i);
   }
-  Reshape(shape_vec, cpu_type, mlu_type, tensor_type, shape_order);
+  Reshape(shape_vec, cpu_type, mlu_type, tensor_type, shape_order, dim_strides);
 }
 #endif
 
@@ -131,7 +134,7 @@ void Blob<Dtype>::Reshape(const vector<int>& shape) {
 #ifdef USE_MLU
   // mlu tensor desc
   BaseDataType dtype = sizeof(Dtype) == 8 ? DT_DOUBLE : DT_FLOAT32;
-  mlu_tensor_desc_.remember(shape, CNML_TENSOR, dtype, DT_FLOAT16, CNML_NCHW);
+  tensor_desc_.remember(shape, CNML_TENSOR, dtype, DT_FLOAT16, CNML_NCHW);
 #endif
 }
 
@@ -183,7 +186,7 @@ template <typename Dtype>
 const Dtype* Blob<Dtype>::cpu_data() const {
   CHECK(data_);
 #ifdef USE_MLU
-  return (const Dtype*)data_->cpu_data(mlu_tensor_desc_);
+  return (const Dtype*)data_->cpu_data(tensor_desc_);
 #else
   return (const Dtype*)data_->cpu_data();
 #endif
@@ -222,17 +225,22 @@ void Blob<Dtype>::set_mlu_data(Dtype* data) {
 template <typename Dtype>
 const Dtype* Blob<Dtype>::mlu_data() {
   CHECK(data_);
-  mlu_tensor_desc_.cpuCreate();
-  mlu_tensor_desc_.mluCreate();
-  return (const Dtype*)data_->mlu_data(mlu_tensor_desc_);
+  tensor_desc_.Create();
+  return (const Dtype*)data_->mlu_data(tensor_desc_);
 }
 
 template <typename Dtype>
 Dtype* Blob<Dtype>::mutable_mlu_data() {
   CHECK(data_);
-  mlu_tensor_desc_.cpuCreate();
-  mlu_tensor_desc_.mluCreate();
-  return static_cast<Dtype*>(data_->mutable_mlu_data(mlu_tensor_desc_));
+  tensor_desc_.Create();
+  return static_cast<Dtype*>(data_->mutable_mlu_data(tensor_desc_));
+}
+
+template <typename Dtype>
+Dtype* Blob<Dtype>::sync_data() {
+  CHECK(data_);
+  tensor_desc_.Create();
+  return static_cast<Dtype*>(data_->mutable_sync_data(tensor_desc_));
 }
 #endif
 
@@ -264,7 +272,7 @@ template <typename Dtype>
 Dtype* Blob<Dtype>::mutable_cpu_data() {
   CHECK(data_);
 #ifdef USE_MLU
-  return static_cast<Dtype*>(data_->mutable_cpu_data(mlu_tensor_desc_));
+  return static_cast<Dtype*>(data_->mutable_cpu_data(tensor_desc_));
 #else
   return static_cast<Dtype*>(data_->mutable_cpu_data());
 #endif

@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -28,20 +28,18 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
 #ifdef USE_MLU
-
 #include <algorithm>
 #include <sstream>
 #include <string>
 #include <vector>
-
 #include "caffe/layers/mlu_bn_layer.hpp"
 #include "caffe/mlu/fusion.hpp"
 
 namespace caffe {
-
 template <typename Dtype>
 void MLUBNLayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& bottom,
       const vector<Blob<Dtype>*>& top) {
+  CHECK(this->phase_ == TEST) << "The phase of the model should be TEST.";
   BNLayer<Dtype>::LayerSetUp(bottom, top);
 }
 
@@ -51,16 +49,15 @@ void MLUBNLayer<Dtype>::Reshape_tensor(
     const vector<Blob<Dtype>*>& top) {
   BNLayer<Dtype>::Reshape(bottom, top);
   BaseDataType cpu_dtype = sizeof(Dtype) == 4 ? DT_FLOAT32 : DT_DOUBLE;
-  BaseDataType mlu_dtype = DT_FLOAT16;
+  BaseDataType mlu_dtype = bottom[0]->mlu_type();
   if (bottom[0] != top[0]) {
     top[0]->Reshape(bottom[0]->shape(), cpu_dtype, mlu_dtype, CNML_TENSOR);
   }
-  vector<int> sz;
-  sz.push_back(this->channels_);
-  LOG(INFO) << "channels number is " << this->channels_;
+  vector<int> sz(4, 1);
+  sz[1] = this->channels_;
   // CNML_CNHW : convert (sz, 1, 1, 1) to (1, sz, 1, 1);
-  this->mean_.Reshape(sz, cpu_dtype, mlu_dtype, CNML_CONST, CNML_CNHW);
-  this->variance_.Reshape(sz, cpu_dtype, mlu_dtype, CNML_CONST, CNML_CNHW);
+  this->mean_.Reshape(sz, cpu_dtype, mlu_dtype, CNML_CONST);
+  this->variance_.Reshape(sz, cpu_dtype, mlu_dtype, CNML_CONST);
   this->temp_bn_.Reshape(bottom[0]->shape(), cpu_dtype, mlu_dtype, CNML_TENSOR);
   this->temp_mult_.Reshape(bottom[0]->shape(), cpu_dtype, mlu_dtype, CNML_TENSOR);
   this->alpha_expand_.Reshape(bottom[0]->shape(), cpu_dtype, mlu_dtype, CNML_CONST);
@@ -103,12 +100,12 @@ void MLUBNLayer<Dtype>::MLUCreateOpBindData(
                                  temp_bn_.mlu_tensor(),
                                  this->mean_.mlu_tensor(),
                                  this->variance_.mlu_tensor()));
-  MLU_CHECK(cnmlBindConstData(this->mean_.mlu_tensor(),
-                             this->mean_.cpu_tensor(),
-                             this->mean_.mutable_cpu_data()));
-  MLU_CHECK(cnmlBindConstData(this->variance_.mlu_tensor(),
-                             this->variance_.cpu_tensor(),
-                             this->variance_.mutable_cpu_data()));
+  MLU_CHECK(cnmlBindConstData_V2(this->mean_.mlu_tensor(),
+                                 this->mean_.sync_data(),
+                                 false));
+  MLU_CHECK(cnmlBindConstData_V2(this->variance_.mlu_tensor(),
+                                 this->variance_.sync_data(),
+                                 false));
   /* mult */
   caffe_cpu_gemm<Dtype>(CblasNoTrans,
       CblasNoTrans, this->num_, this->channels_, 1, 1,
@@ -124,9 +121,9 @@ void MLUBNLayer<Dtype>::MLUCreateOpBindData(
                             this->alpha_expand_.mlu_tensor(),
                             temp_bn_.mlu_tensor(),
                             temp_mult_.mlu_tensor()));
-  MLU_CHECK(cnmlBindConstData(this->alpha_expand_.mlu_tensor(),
-                              this->alpha_expand_.cpu_tensor(),
-                              this->alpha_expand_.mutable_cpu_data()));
+  MLU_CHECK(cnmlBindConstData_V2(this->alpha_expand_.mlu_tensor(),
+                                 this->alpha_expand_.sync_data(),
+                                 false));
   /* add */
   caffe_cpu_gemm<Dtype>(CblasNoTrans, CblasNoTrans,
                         this->num_, this->channels_, 1, Dtype(1),
@@ -142,19 +139,19 @@ void MLUBNLayer<Dtype>::MLUCreateOpBindData(
                             this->beta_expand_.mlu_tensor(),
                             temp_mult_.mlu_tensor(),
                             top[0]->mlu_tensor()));
-  MLU_CHECK(cnmlBindConstData(this->beta_expand_.mlu_tensor(),
-                              this->beta_expand_.cpu_tensor(),
-                              this->beta_expand_.mutable_cpu_data()));
+  MLU_CHECK(cnmlBindConstData_V2(this->beta_expand_.mlu_tensor(),
+                                 this->beta_expand_.sync_data(),
+                                 false));
 }
 
 template <typename Dtype>
 void MLUBNLayer<Dtype>::MLUCompileOp() {
   MLU_CHECK(cnmlCompileBaseOp(batch_norm_op_ptr_,
-                              Caffe::rt_core(), Caffe::model_parallel()));
+                              Caffe::rt_core(), Caffe::core_number()));
   MLU_CHECK(cnmlCompileBaseOp(mult_op_ptr_,
-                              Caffe::rt_core(), Caffe::model_parallel()));
+                              Caffe::rt_core(), Caffe::core_number()));
   MLU_CHECK(cnmlCompileBaseOp(add_op_ptr_,
-                              Caffe::rt_core(), Caffe::model_parallel()));
+                              Caffe::rt_core(), Caffe::core_number()));
 }
 
 template <typename Dtype>
@@ -178,15 +175,12 @@ void MLUBNLayer<Dtype>::Forward_mlu(const vector<Blob<Dtype>*>& bottom,
                                          Caffe::forward_param(),
                                          Caffe::queue()));
   MLU_CHECK(cnmlComputeMultOpForward_V3(mult_op_ptr_,
-                                 // this->alpha_expand_.mutable_mlu_data(),
                                  nullptr,
                                  temp_bn_.mutable_mlu_data(),
                                  temp_mult_.mutable_mlu_data(),
                                  Caffe::forward_param(),
                                  Caffe::queue()));
-
   MLU_CHECK(cnmlComputeAddOpForward_V3(add_op_ptr_,
-                                 // this->beta_expand_.mutable_mlu_data(),
                                  nullptr,
                                  temp_mult_.mutable_mlu_data(),
                                  top[0]->mutable_mlu_data(),
@@ -195,5 +189,6 @@ void MLUBNLayer<Dtype>::Forward_mlu(const vector<Blob<Dtype>*>& bottom,
 }
 
 INSTANTIATE_CLASS(MLUBNLayer);
+
 }  // namespace caffe
 #endif  // USE_MLU

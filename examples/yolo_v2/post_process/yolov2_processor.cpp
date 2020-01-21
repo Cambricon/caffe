@@ -1,8 +1,9 @@
+
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -34,6 +35,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "yolov2_processor.hpp"
 #include "command_option.hpp"
 #include "common_functions.hpp"
+
 
 template <typename Dtype, template <typename> class Qtype>
 void YoloV2Processor<Dtype, Qtype>::IntersectBBox(const NormalizedBBox& bbox1,
@@ -134,10 +136,10 @@ void YoloV2Processor<Dtype, Qtype>::setNormalizedBBox(NormalizedBBox* bbox,
 template <typename Dtype, template <typename> class Qtype>
 void YoloV2Processor<Dtype, Qtype>::class_index_and_score(float* input,
                            int classes,
-                           PredictionResult* predict) {
+                           float confidence_threshold_,
+                           map<int, float> *prob_index) {
   float sum = 0;
   float large = input[0];
-  int classIndex = 0;
   for (int i = 0; i < classes; ++i) {
     if (input[i] > large)
       large = input[i];
@@ -152,16 +154,17 @@ void YoloV2Processor<Dtype, Qtype>::class_index_and_score(float* input,
     input[i] = input[i] / sum;
   }
   large = input[0];
-  classIndex = 0;
 
   for (int i = 0; i < classes; ++i) {
     if (input[i] > large) {
       large = input[i];
-      classIndex = i;
     }
   }
-  predict->classType = classIndex;
-  predict->classScore = large;
+  for (int i = 0; i < classes; i++) {
+    if (input[i] > confidence_threshold_) {
+      (*prob_index)[i] = input[i];
+    }
+  }
 }
 
 template <typename Dtype, template <typename> class Qtype>
@@ -176,32 +179,60 @@ void YoloV2Processor<Dtype, Qtype>::get_region_box(float* x, PredictionResult* p
 
 template <typename Dtype, template <typename> class Qtype>
 void YoloV2Processor<Dtype, Qtype>::ApplyNms(vector<PredictionResult>* boxes,
-              vector<int>* idxes, float threshold) {
-  map<int, int> idx_map;
-  for (int i = 0; i < (*boxes).size() - 1; ++i) {
-    if (idx_map.find(i) != idx_map.end()) {
-      continue;
+                    vector<int>* idxes, float threshold,
+                    vector< vector<float>>* result,
+                    int b, int num_classes_) {
+  for (int k = 0; k < num_classes_; k++) {
+    vector<PredictionResult> cur_boxes;
+    for (int i = 0; i < (*boxes).size(); i++) {
+      if ((*boxes)[i].classType == k) {
+        cur_boxes.push_back((*boxes)[i]);
+      }
     }
-    for (int j = i + 1; j < (*boxes).size(); ++j) {
-      if (idx_map.find(j) != idx_map.end()) {
+    if (cur_boxes.empty()) continue;
+    std::sort(cur_boxes.begin(), cur_boxes.end(),
+        [](const PredictionResult& pa, const PredictionResult& pb){
+          float diff = pa.confidence - pb.confidence;
+          if (diff > 0) return 1;
+          return 0;
+        });
+
+    map<int, int> idx_map;
+    for (int i = 0; i < cur_boxes.size() - 1; ++i) {
+      if (idx_map.find(i) != idx_map.end()) {
         continue;
       }
-      NormalizedBBox Bbox1, Bbox2;
-      setNormalizedBBox(&Bbox1, (*boxes)[i].x, (*boxes)[i].y,
-                        (*boxes)[i].w, (*boxes)[i].h);
-      setNormalizedBBox(&Bbox2, (*boxes)[j].x, (*boxes)[j].y,
-                        (*boxes)[j].w, (*boxes)[j].h);
+      for (int j = i + 1; j < cur_boxes.size(); ++j) {
+        if (idx_map.find(j) != idx_map.end()) {
+          continue;
+        }
+        NormalizedBBox Bbox1, Bbox2;
+        setNormalizedBBox(&Bbox1, cur_boxes[i].x, cur_boxes[i].y,
+                          cur_boxes[i].w, cur_boxes[i].h);
+        setNormalizedBBox(&Bbox2, cur_boxes[j].x, cur_boxes[j].y,
+                          cur_boxes[j].w, cur_boxes[j].h);
 
-      float overlap = JaccardOverlap(Bbox1, Bbox2, true);
+        float overlap = JaccardOverlap(Bbox1, Bbox2, true);
 
-      if (overlap >= threshold) {
-        idx_map[j] = 1;
+        if (overlap >= threshold) {
+          if (cur_boxes[i].confidence > cur_boxes[j].confidence) idx_map[j] = 1;
+          else
+            idx_map[i] = 1;
+        }
       }
     }
-  }
-  for (int i = 0; i < (*boxes).size(); ++i) {
-    if (idx_map.find(i) == idx_map.end()) {
-      (*idxes).push_back(i);
+    for (int i = 0; i < cur_boxes.size(); ++i) {
+      if (idx_map.find(i) == idx_map.end()) {
+        std::vector<float> tmp;
+        tmp.push_back(b);
+        tmp.push_back(cur_boxes[i].classType);
+        tmp.push_back(cur_boxes[i].confidence);
+        tmp.push_back(cur_boxes[i].x);
+        tmp.push_back(cur_boxes[i].y);
+        tmp.push_back(cur_boxes[i].w);
+        tmp.push_back(cur_boxes[i].h);
+        (*result).push_back(tmp);
+      }
     }
   }
 }
@@ -211,76 +242,88 @@ std::vector<std::vector<float> > YoloV2Processor<Dtype, Qtype>::detection_out(
                                   float* net_output,
                                   int out_n, int out_c, int out_h, int out_w) {
   vector< vector<float> > result;
-  float* swap_data = reinterpret_cast<float*>
+
+  // MLU output
+  if (FLAGS_Bangop != 0) {
+    for (int b = 0; b < out_n; b++) {
+      for (int i = 0+b*out_c*out_w; i < (1+b)*out_c*out_w; i = i+out_w) {
+        if (net_output[i] !=  -1.0) {
+          std::vector<float> temp;
+          temp.push_back(b);  // Image_Id
+          temp.push_back(net_output[i+1]);  // label
+          temp.push_back(net_output[i+2]);  // confidence
+          temp.push_back(net_output[i+3]);  // x
+          temp.push_back(net_output[i+4]);  // y
+          temp.push_back(net_output[i+5]);  // w
+          temp.push_back(net_output[i+6]);  // h
+          result.push_back(temp);
+        }
+      }
+    }
+  } else {
+    float* swap_data = reinterpret_cast<float*>
                    (malloc(sizeof(float) * out_n * out_c * out_h * out_w));
-  int index = 0;
-  for (int b = 0; b < out_n; ++b)
-    for (int h = 0; h < out_h; ++h)
-      for (int w = 0; w < out_w; ++w)
-        for (int c = 0; c < out_c; ++c) {
-          swap_data[index++] =
-           net_output[ b*out_c*out_h*out_w + c*out_h*out_w + h*out_w +w];
-        }
-
-  vector<PredictionResult> predicts;
-  PredictionResult predict;
-  predicts.clear();
-
-
-  vector<float> biases_;
-  biases_.push_back(1.3221);
-  biases_.push_back(1.73145);
-  biases_.push_back(3.19275);
-  biases_.push_back(4.00944);
-  biases_.push_back(5.05587);
-  biases_.push_back(8.09892);
-  biases_.push_back(9.47112);
-  biases_.push_back(4.84053);
-  biases_.push_back(11.2364);
-  biases_.push_back(10.0071);
-
-  int side_ = 13;
-  int num_box_ = 5;
-  int num_classes_ = 20;
-  float nms_threshold_ = 0.4;
-  float confidence_threshold_  = 0.45;
-  for (int b = 0; b < out_n; ++b) {
-    for (int j = 0; j < side_; ++j)
-      for (int i = 0; i < side_; ++i)
-        for (int n = 0; n < num_box_; ++n) {
-          int index = b * out_c * out_h * out_w + (j * side_ + i) * out_c +
-                      n * out_c / num_box_;
-          get_region_box(swap_data, &predict, biases_, n,
-                         index, i, j, side_, side_);
-          predict.objScore = sigmoid(swap_data[index + 4]);
-          class_index_and_score(swap_data+index + 5, num_classes_, &predict);
-          predict.confidence = predict.objScore * predict.classScore;
-          if (predict.confidence >= confidence_threshold_) {
-            predicts.push_back(predict);
+    int index = 0;
+    for (int b = 0; b < out_n; ++b)
+      for (int h = 0; h < out_h; ++h)
+        for (int w = 0; w < out_w; ++w)
+          for (int c = 0; c < out_c; ++c) {
+            swap_data[index++] =
+             net_output[ b*out_c*out_h*out_w + c*out_h*out_w + h*out_w +w];
           }
-        }
-    vector<int> idxes;
-    int num_kept = 0;
-    if (predicts.size() > 0) {
-      ApplyNms(&predicts, &idxes, nms_threshold_);
-      num_kept = idxes.size();
-    }
 
-    for (int i = 0; i < num_kept; i++) {
-      std::vector<float> temp;
-      temp.push_back(b);  // Image_Id
-      temp.push_back(predicts[idxes[i]].classType);  // label
-      temp.push_back(predicts[idxes[i]].confidence);  // confidence
-      temp.push_back(predicts[idxes[i]].x);
-      temp.push_back(predicts[idxes[i]].y);
-      temp.push_back(predicts[idxes[i]].w);
-      temp.push_back(predicts[idxes[i]].h);
-      result.push_back(temp);
-    }
+    vector<PredictionResult> predicts;
+    PredictionResult predict;
     predicts.clear();
-  }
 
-  free(swap_data);
+    vector<float> biases_;
+    biases_.push_back(1.3221);
+    biases_.push_back(1.73145);
+    biases_.push_back(3.19275);
+    biases_.push_back(4.00944);
+    biases_.push_back(5.05587);
+    biases_.push_back(8.09892);
+    biases_.push_back(9.47112);
+    biases_.push_back(4.84053);
+    biases_.push_back(11.2364);
+    biases_.push_back(10.0071);
+
+    int side_ = 13;
+    int num_box_ = 5;
+    int num_classes_ = 20;
+    float nms_threshold_ = 0.45;
+    float confidence_threshold_  = 0.005;
+    if (FLAGS_confidencethreshold) {
+      confidence_threshold_  = FLAGS_confidencethreshold;
+    }
+    for (int b = 0; b < out_n; ++b) {
+      for (int j = 0; j < side_; ++j)
+        for (int i = 0; i < side_; ++i)
+          for (int n = 0; n < num_box_; ++n) {
+            int index = b * out_c * out_h * out_w + (j * side_ + i) * out_c +
+                        n * out_c / num_box_;
+            get_region_box(swap_data, &predict, biases_, n,
+                           index, i, j, side_, side_);
+            predict.objScore = sigmoid(swap_data[index + 4]);
+            map<int, float> prob_index;
+            class_index_and_score(swap_data+index + 5, num_classes_,
+                                  confidence_threshold_, &prob_index);
+            for (int k = 0; k < num_classes_; k++) {
+              predict.confidence = predict.objScore * prob_index[k];
+              if (predict.confidence > confidence_threshold_) {
+                predict.classType = k;
+                predicts.push_back(predict);
+              }
+            }
+          }
+      vector<int> idxes;
+      if (predicts.size() > 0) {
+        ApplyNms(&predicts, &idxes, nms_threshold_, &result, b, num_classes_);
+      }
+      predicts.clear();
+    }
+    free(swap_data);
+  }
   return result;
 }
 template <typename Dtype, template <typename> class Qtype>
@@ -302,15 +345,40 @@ void YoloV2Processor<Dtype, Qtype>::get_point_position(const vector<float> pos,
 }
 
 template <typename Dtype, template <typename> class Qtype>
+void YoloV2Processor<Dtype, Qtype>::correct_region_boxes(vector<vector<float>>* boxes,
+                        const cv::Mat image) {
+  int new_w = 0;
+  int new_h = 0;
+  int netw = 416;
+  int neth = 416;
+  int w = image.cols;
+  int h = image.rows;
+  if ((static_cast<float>(netw)/w) < (static_cast<float>(neth)/h)) {
+    new_w = netw;
+    new_h = (h * netw)/w;
+  }  else {
+    new_h = neth;
+    new_w = (w * neth)/h;
+  }
+  for (int i = 0; i < (*boxes).size(); i++) {
+    (*boxes)[i][3] = ((*boxes)[i][3] - (netw - new_w)/2./netw) /
+                      (static_cast<float>(new_w)/netw);
+    (*boxes)[i][4] = ((*boxes)[i][4] - (neth - new_h)/2./neth) /
+                      (static_cast<float>(new_h)/neth);
+    (*boxes)[i][5] *= static_cast<float>(netw)/new_w;
+    (*boxes)[i][6] *= static_cast<float>(neth)/new_h;
+  }
+}
+
+template <typename Dtype, template <typename> class Qtype>
 void YoloV2Processor<Dtype, Qtype>::WriteVisualizeBBox_offline(
                    const vector<cv::Mat>& images,
                    const vector<vector<float>>& detections,
                    const vector<string>& labels_,
-                   const vector<string>& img_names) {
+                   const vector<string>& img_names,
+                   const int from, const int to) {
   // Retrieve detections.
-  const int num_img = images.size();
-
-  for (int i = 0; i < num_img; ++i) {
+  for (int i = from; i < to; ++i) {
     cv::Mat tmp = images[i];
     cv::Mat image;
     if (FLAGS_yuv) {
@@ -318,6 +386,10 @@ void YoloV2Processor<Dtype, Qtype>::WriteVisualizeBBox_offline(
     } else {
       image = tmp;
     }
+
+    vector<vector<float>> boxes = detections;
+    correct_region_boxes(&boxes, image);
+
     std::string name = img_names[i];
     int pos_map = img_names[i].rfind("/");
     if (pos_map > 0 && pos_map < img_names[i].size()) {
@@ -329,7 +401,7 @@ void YoloV2Processor<Dtype, Qtype>::WriteVisualizeBBox_offline(
     }
     name = FLAGS_outputdir + "/" + name + ".txt";
     std::ofstream file_map(name);
-    for (auto box : detections) {
+    for (auto box : boxes) {
       if (box[0] != i) {
         continue;
       }
@@ -371,6 +443,7 @@ void YoloV2Processor<Dtype, Qtype>::WriteVisualizeBBox_offline(
     ss << FLAGS_outputdir << "/yolov2_" << fileName;
     if (FLAGS_yuv) ss << ".jpg";
     ss >> outFile;
+
     cv::imwrite(outFile.c_str(), image);
   }
 }
@@ -405,7 +478,7 @@ void YoloV2Processor<Dtype, Qtype>::WriteVisualizeBBox_online(
     } else {
       image = tmp;
     }
-
+    correct_region_boxes(&boxes, image);
     for (int j = 0; j < boxes.size(); ++j) {
       if (boxes[j][1] == -1 && boxes[j][2] == -1 &&
           boxes[j][3] == -1 && boxes[j][4] == -1 &&

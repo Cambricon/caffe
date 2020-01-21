@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -1846,16 +1846,19 @@ TYPED_TEST(MLUPoolingLayerTest, TestForwardMaxRectWide) {
 }
 
 TYPED_TEST(MLUPoolingLayerTest, TestForwardMaxTopIndex) {
+  if(Caffe::rt_core() > 4)return;
   this->blob_top_vec_.push_back(this->blob_top_mask_);
   this->TestForwardSquare();
 }
 
 TYPED_TEST(MLUPoolingLayerTest, TestMaxTopIndexRectHigh) {
+  if(Caffe::rt_core() > 4)return;
   this->blob_top_vec_.push_back(this->blob_top_mask_);
   this->TestForwardRectHigh();
 }
 
 TYPED_TEST(MLUPoolingLayerTest, TestMaxTopIndexRectWide) {
+  if(Caffe::rt_core() > 4)return;
   this->blob_top_vec_.push_back(this->blob_top_mask_);
   this->TestForwardRectWide();
 }
@@ -2607,16 +2610,19 @@ TYPED_TEST(MFUSPoolingLayerTest, TestForwardMaxRectWide) {
 }
 
 TYPED_TEST(MFUSPoolingLayerTest, TestForwardMaxTopIndex) {
+  if(Caffe::rt_core() > 4)return;
   this->blob_top_vec_.push_back(this->blob_top_mask_);
   this->TestForwardSquare();
 }
 
 TYPED_TEST(MFUSPoolingLayerTest, TestMaxTopIndexRectHigh) {
+  if(Caffe::rt_core() > 4)return;
   this->blob_top_vec_.push_back(this->blob_top_mask_);
   this->TestForwardRectHigh();
 }
 
 TYPED_TEST(MFUSPoolingLayerTest, TestMaxTopIndexRectWide) {
+  if(Caffe::rt_core() > 4)return;
   this->blob_top_vec_.push_back(this->blob_top_mask_);
   this->TestForwardRectWide();
 }

@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -97,11 +97,10 @@ void MLUUnPoolingLayer<Dtype>::FillMask() {
   }
 }
 template <typename Dtype>
-void MLUUnPoolingLayer<Dtype>::Reshape_tensor(
-                               const vector<Blob<Dtype>*>& bottom,
-                               const vector<Blob<Dtype>*>& top) {
+void MLUUnPoolingLayer<Dtype>::Reshape_tensor(const vector<Blob<Dtype>*>& bottom,
+                                              const vector<Blob<Dtype>*>& top) {
   BaseDataType cpu_dtype = sizeof(Dtype) == 4 ? DT_FLOAT32 : DT_DOUBLE;
-  BaseDataType mlu_dtype = DT_FLOAT16;
+  BaseDataType mlu_dtype = bottom[0]->mlu_type();
 
   num_ = bottom[0]->num();
   channels_ = bottom[0]->channels();
@@ -127,7 +126,7 @@ template <typename Dtype>
 void MLUUnPoolingLayer<Dtype>::MLUCompileOp() {
   MLU_CHECK(cnmlCompileBaseOp(unpooling_op_ptr_,
                               Caffe::rt_core(),
-                              Caffe::model_parallel()));
+                              Caffe::core_number()));
 }
 
 template <typename Dtype>
@@ -175,9 +174,9 @@ void MLUUnPoolingLayer<Dtype>::MLUCreateOpBindData(
                                    mlu_mask_->mlu_tensor(),
                                    top[0]->mlu_tensor(),
                                    unpooling_param_ptr_));
-      MLU_CHECK(cnmlBindConstData(mlu_mask_->mlu_tensor(),
-                                  mlu_mask_->cpu_tensor(),
-                                  mlu_mask_->mutable_cpu_data()));
+      MLU_CHECK(cnmlBindConstData_V2(mlu_mask_->mlu_tensor(),
+                                  mlu_mask_->sync_data(),
+                                  false));
       break;
     case UnPoolingParameter_UnPoolMethod_REP:
       unpool_mode_ = CNML_REP;
@@ -192,9 +191,9 @@ void MLUUnPoolingLayer<Dtype>::MLUCreateOpBindData(
                                    mlu_mask_->mlu_tensor(),
                                    top[0]->mlu_tensor(),
                                    unpooling_param_ptr_));
-      MLU_CHECK(cnmlBindConstData(mlu_mask_->mlu_tensor(),
-                                  mlu_mask_->cpu_tensor(),
-                                  mlu_mask_->mutable_cpu_data()));
+      MLU_CHECK(cnmlBindConstData_V2(mlu_mask_->mlu_tensor(),
+                                  mlu_mask_->sync_data(),
+                                  false));
       break;
     default:
       LOG(FATAL) << "Unknown unpooling method.";
@@ -228,6 +227,6 @@ void MLUUnPoolingLayer<Dtype>::Forward_mlu(const vector<Blob<Dtype>*>& bottom,
 }
 
 INSTANTIATE_CLASS(MLUUnPoolingLayer);
-}  // namespace caffe
 
+}  // namespace caffe
 #endif  // USE_MLU
