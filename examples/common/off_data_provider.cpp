@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -46,18 +46,19 @@ void OffDataProvider<Dtype, Qtype>::runParallel() {
   OffRunner<Dtype, Qtype> *runner = static_cast<OffRunner<Dtype, Qtype>*>(this->runner_);
 
   setDeviceId(runner->deviceId());
-  int channel = this->threadId_ / runner->deviceSize() % 4;
-  cnrtSetCurrentChannel((cnrtChannelType_t)channel);
+  this->deviceId_ = runner->deviceId();
 
   allocateMemory(FLAGS_fifosize);
 
   Pipeline<Dtype, Qtype>::waitForNotification();
 #ifdef PRE_READ
-  for (int i = 0; i < inImages_.size(); i++) {
-    vector<cv::Mat> rawImages = inImages_[i];
-    vector<string> imageNameVec = imageName_[i];
+  for (int i = 0; i < this->inImages_.size(); i++) {
+    Timer preprocessor;
+    vector<cv::Mat> rawImages = this->inImages_[i];
+    vector<string> imageNameVec = this->imageName_[i];
 #else
   while (this->imageList.size()) {
+    Timer preprocessor;
     this->inImages_.clear();
     this->imageName_.clear();
     this->readOneBatch();
@@ -73,21 +74,36 @@ void OffDataProvider<Dtype, Qtype>::runParallel() {
 
     void** mluData = runner->popFreeInputData();
     Timer copyin;
-    CNRT_CHECK(cnrtMemcpyBatchByDescArray(mluData,
-                                          cpuData_,
-                                          runner->inDescs(),
-                                          runner->inBlobNum(),
-                                          runner->dataParallel(),
-                                          CNRT_MEM_TRANS_DIR_HOST2DEV));
-    copyin.log("copyin time ...");
+    cnrtDataType_t mluDtype = runner->mluInputDtype()[0];
+    cnrtDataType_t cpuDtype;
+    if (FLAGS_yuv) {
+      cpuDtype = CNRT_UINT8;
+    } else {
+      cpuDtype = CNRT_FLOAT32;
+    }
 
-    runner->pushValidInputData(mluData);
-    runner->pushValidInputNames(imageNameVec);
+    int dim_values[4] = {runner->n(), runner->c(), runner->h(), runner->w()};
+    int dim_order[4] = {0, 2, 3, 1};  // NCHW --> NHWC
+    if (mluDtype != cpuDtype) {
+      CNRT_CHECK(cnrtTransOrderAndCast(reinterpret_cast<void*>(cpuData_[0]), cpuDtype,
+            reinterpret_cast<void*>(syncCpuData_[0]), mluDtype,
+            nullptr, 4, dim_values, dim_order));
+    } else {
+      CNRT_CHECK(cnrtTransDataOrder(reinterpret_cast<void*>(cpuData_[0]), mluDtype,
+            reinterpret_cast<void*>(syncCpuData_[0]), 4, dim_values, dim_order));
+    }
+    CNRT_CHECK(cnrtMemcpy(reinterpret_cast<void*>(mluData[0]),
+                          reinterpret_cast<void*>(syncCpuData_[0]),
+                          runner->inputSizeArray()[0],
+                          CNRT_MEM_TRANS_DIR_HOST2DEV));
+    copyin.log("copyin time ...");
+    preprocessor.log("preprocessor time ...");
+
+    runner->pushValidInputDataAndNames(mluData, imageNameVec);
   }
 
   LOG(INFO) << "DataProvider: no data ...";
   // tell runner there is no more images
-  runner->pushValidInputData(nullptr);
 }
 
 template <typename Dtype, template <typename> class Qtype>
@@ -111,15 +127,34 @@ void OffDataProvider<Dtype, Qtype>::runSerial() {
     this->Preprocess(rawImages, &preprocessedImages);
 
     void** mluData = runner->popFreeInputData();
-    CNRT_CHECK(cnrtMemcpyBatchByDescArray(mluData,
-                                          cpuData_,
-                                          runner->inDescs(),
-                                          runner->inBlobNum(),
-                                          1,
-                                          CNRT_MEM_TRANS_DIR_HOST2DEV));
+    cnrtDataType_t mluDtype = runner->mluInputDtype()[0];
+    cnrtDataType_t cpuDtype;
+    if (FLAGS_yuv) {
+      cpuDtype = CNRT_UINT8;
+    } else {
+      cpuDtype = CNRT_FLOAT32;
+    }
+    int dim_values[4] = {runner->n(), runner->c(), runner->h(), runner->w()};
+    int dim_order[4] = {0, 2, 3, 1};  // NCHW --> NHWC
 
+    if (mluDtype != cpuDtype) {
+      CNRT_CHECK(cnrtTransOrderAndCast(reinterpret_cast<void*>(cpuData_[0]), cpuDtype,
+          reinterpret_cast<void*>(syncCpuData_[0]), mluDtype,
+          nullptr, 4, dim_values, dim_order));
+    } else {
+      CNRT_CHECK(cnrtTransDataOrder(reinterpret_cast<void*>(cpuData_[0]), mluDtype,
+          reinterpret_cast<void*>(syncCpuData_[0]), 4, dim_values, dim_order));
+    }
+
+    CNRT_CHECK(cnrtMemcpy(reinterpret_cast<void*>(mluData[0]),
+                          reinterpret_cast<void*>(syncCpuData_[0]),
+                          runner->inputSizeArray()[0],
+                          CNRT_MEM_TRANS_DIR_HOST2DEV));
     runner->pushValidInputData(mluData);
     runner->pushValidInputNames(imageNameVec);
+    for (auto images : imageNameVec) {
+      std::cout << images << std::endl;
+    }
   } else {
     LOG(INFO) << "DataProvider: no data ...";
     // tell runner there is no more images
@@ -129,23 +164,26 @@ void OffDataProvider<Dtype, Qtype>::runSerial() {
 template <typename Dtype, template <typename> class Qtype>
 void OffDataProvider<Dtype, Qtype>::allocateMemory(int queueLength) {
   OffRunner<Dtype, Qtype> *runner = static_cast<OffRunner<Dtype, Qtype>*>(this->runner_);
-
   for (int i = 0; i < queueLength; i++) {
-    void **inputMluPtrS, **outputMluPtrS;
-    cnrtMallocBatchByDescArray(&inputMluPtrS ,
-                               runner->inDescs(),
-                               runner->inBlobNum(),
-                               runner->dataParallel());
-    cnrtMallocBatchByDescArray(&outputMluPtrS,
-                               runner->outDescs(),
-                               runner->outBlobNum(),
-                               runner->dataParallel());
+    int inBlobNum = runner->inBlobNum();
+    int outBlobNum = runner->outBlobNum();
+    void** inputMluPtrS =
+      reinterpret_cast<void**>(malloc(sizeof(void*) * inBlobNum));
+    void** outputMluPtrS =
+      reinterpret_cast<void**>(malloc(sizeof(void*) * outBlobNum));
+
+    // malloc input
+    for (int i = 0; i < inBlobNum; i++) {
+      CNRT_CHECK(cnrtMalloc(&(inputMluPtrS[i]), runner->inputSizeArray()[i]));
+    }
+    for (int i = 0; i < outBlobNum; i++) {
+      CNRT_CHECK(cnrtMalloc(&(outputMluPtrS[i]), runner->outputSizeArray()[i]));
+    }
     runner->pushFreeInputData(inputMluPtrS);
     runner->pushFreeOutputData(outputMluPtrS);
-    runner->pushInPtrVector(inputMluPtrS);
-    runner->pushOutPtrVector(outputMluPtrS);
+    pushInPtrVector(inputMluPtrS);
+    pushOutPtrVector(outputMluPtrS);
   }
-
   this->inNum_ = runner->n();
   this->inChannel_ = runner->c();
   this->inHeight_ = runner->h();
@@ -156,6 +194,8 @@ void OffDataProvider<Dtype, Qtype>::allocateMemory(int queueLength) {
   cpuData_ = new(void*);
   cpuData_[0] = new float[this->inNum_ * this->inChannel_ *
                           this->inHeight_ * this->inWidth_];
+  syncCpuData_ = new(void*);
+  syncCpuData_[0] = new char[runner->inputSizeArray()[0]];
 }
 
 void setDeviceId(int deviceID) {

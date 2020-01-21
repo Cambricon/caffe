@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018--2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -29,23 +29,26 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #ifndef INCLUDE_CAFFE_LAYERS_MLU_ELTWISE_LAYER_HPP_
 #define INCLUDE_CAFFE_LAYERS_MLU_ELTWISE_LAYER_HPP_
-
 #ifdef USE_MLU
-
 #include <vector>
-
 #include "caffe/blob.hpp"
 #include "caffe/layer.hpp"
 #include "caffe/proto/caffe.pb.h"
-
 #include "caffe/layers/eltwise_layer.hpp"
 
 namespace caffe {
+
+/**
+ * @brief MLU acceleration of EltwiseLayer
+ *        EltwiseLayer Compute elementwise operations, such as product and sum,
+ *        along multiple input Blobs.
+ *
+ */
 template <typename Dtype>
 class MLUEltwiseLayer : public EltwiseLayer<Dtype> {
   public:
   explicit MLUEltwiseLayer(const LayerParameter& param)
-      : EltwiseLayer<Dtype>(param) {}
+      : EltwiseLayer<Dtype>(param), beta_(nullptr){}
   virtual void LayerSetUp(const vector<Blob<Dtype>*>& bottom,
                           const vector<Blob<Dtype>*>& top);
   virtual ~MLUEltwiseLayer();
@@ -79,10 +82,13 @@ class MLUEltwiseLayer : public EltwiseLayer<Dtype> {
   virtual void Forward_mlu(const vector<Blob<Dtype>*>& bottom,
                            const vector<Blob<Dtype>*>& top);
   vector<Blob<Dtype>*> alpha_;
+  Blob<Dtype>* beta_;          // all is 0, for ScaleOp;
   vector<Blob<Dtype>*> temp_;
+  vector<Blob<Dtype>*> temp2_;
+  vector<cnmlBaseOp_t> vec_scale_op_ptr_;
+  vector<cnmlBaseOp_t> vec_add_op_ptr_;
   vector<cnmlBaseOp_t> vec_mult_op_ptr_;
   vector<cnmlBaseOp_t> vec_max_op_ptr_;
-  vector<cnmlBaseOp_t> vec_sum_op_ptr_;
 };
 
 }  // namespace caffe

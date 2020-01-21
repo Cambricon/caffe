@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -30,13 +30,19 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #ifndef INCLUDE_CAFFE_LAYERS_MLU_AXPY_LAYER_HPP_
 #define INCLUDE_CAFFE_LAYERS_MLU_AXPY_LAYER_HPP_
 #ifdef USE_MLU
-
 #include <vector>
 #include "caffe/blob.hpp"
 #include "caffe/layers/axpy_layer.hpp"
 #include "caffe/proto/caffe.pb.h"
 
 namespace caffe {
+/**
+ * @brief MLU acceleration of AxpyLayer
+ *        For reduce memory and time both on training and testing, we combine
+ *        channel-wise scale operation and element-wise addition operation
+ *        into a single layer called "axpy".
+ */
+
 template <typename Dtype>
 class MLUAxpyLayer : public AxpyLayer<Dtype> {
   public:
@@ -48,7 +54,6 @@ class MLUAxpyLayer : public AxpyLayer<Dtype> {
                               const vector<Blob<Dtype>*>& top);
   virtual void fuse(MFusion<Dtype>* fuser);
   virtual ~MLUAxpyLayer();
-
   virtual inline bool mfus_supported() { return true; }
 
   protected:
@@ -58,13 +63,21 @@ class MLUAxpyLayer : public AxpyLayer<Dtype> {
   virtual void MLUCompileOp() {
     MLU_CHECK(cnmlCompileBaseOp(axpy_op_ptr_,
                                 Caffe::rt_core(),
-                                Caffe::model_parallel()));
+                                Caffe::core_number()));
   }
+/**
+ * @param Formulation:
+ *            F = a * X + Y
+ *	  Shape info:
+ *            a:  N x C          --> bottom[0]
+ *            X:  N x C x H x W  --> bottom[1]
+ *            Y:  N x C x H x W  --> bottom[2]
+ *            F:  N x C x H x W  --> top[0]
+ */
   virtual void Forward_mlu(const vector<Blob<Dtype>*>& bottom,
                            const vector<Blob<Dtype>*>& top);
   cnmlBaseOp_t axpy_op_ptr_;
 };
-
 }  // namespace caffe
 #endif  // USE_MLU
 #endif  // INCLUDE_CAFFE_LAYERS_MLU_AXPY_LAYER_HPP_

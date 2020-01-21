@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -48,6 +48,8 @@ using std::stringstream;
 
 DEFINE_int32(dump, 1, "0 or 1, dump output images or not.");
 DEFINE_string(outputdir, ".", "The directoy used to save output images");
+DEFINE_double(confidencethreshold, 0.005,  "Only keep detections with score equal "
+                                          "to or higher than the threshold.");
 
 typedef OnDataProvider<float, Queue> OnDataProviderT;
 typedef OnRunner<float, Queue> OnRunnerT;
@@ -71,7 +73,8 @@ int main(int argc, char* argv[]) {
         "    yolov2_online [FLAGS] model_file weights_file list_file\n");
   gflags::ParseCommandLineFlags(&argc, &argv, true);
   if (argc == 0) {
-    gflags::ShowUsageWithFlagsRestrict(argv[0], "examples/yolo_v2/yolov2_online");
+    gflags::ShowUsageWithFlagsRestrict(argv[0],
+        "examples/yolo_v2/yolov2_online_singlecore");
     return 1;
   }
 
@@ -90,12 +93,11 @@ int main(int argc, char* argv[]) {
   ImageReader img_reader(FLAGS_images);
   auto&& imageList = img_reader.getImageList();
   int imageNum = img_reader.getImageNum();
+  caffe::Caffe::setDetectOpMode(FLAGS_Bangop);
 
   auto provider = new OnDataProviderT(FLAGS_meanfile, FLAGS_meanvalue,
                                       imageList[0]);
-
   auto runner = new OnRunnerT(FLAGS_model, FLAGS_weights, deviceIds_[0]);
-
   auto postprocessor = new YoloV2OnPostProcessorT();
 
   auto pipeline = new PipelineT(provider, runner, postprocessor);
@@ -105,6 +107,7 @@ int main(int argc, char* argv[]) {
   timer.log("Total execution time");
   float execTime = timer.getDuration();
   LOG(INFO) << "End2end throughput fps: " << imageNum / execTime * 1e6;
+  saveResult(imageNum, (-1), (-1), (-1), (-1), execTime);
 
   delete pipeline;
 

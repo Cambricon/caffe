@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -396,6 +396,58 @@ TYPED_TEST(MLUConvolutionDepthwiseLayerTest, TestSimpleConvolution) {
   EVENT_TIME(layer->get_event_time());
 }
 
+TYPED_TEST(MLUConvolutionDepthwiseLayerTest, TestConvolutiondiffpad) {
+  typedef typename TypeParam::Dtype Dtype;
+  this->blob_bottom_vec_.push_back(this->blob_bottom_2_);
+  this->blob_top_vec_.push_back(this->blob_top_2_);
+  this->conv_top_vec_.push_back(this->conv_top_2_);
+  LayerParameter layer_param;
+  layer_param.set_type("ConvolutionDepthwise");
+  ConvolutionParameter* convolution_param =
+      layer_param.mutable_convolution_param();
+  convolution_param->add_kernel_size(3);
+  convolution_param->add_stride(2);
+  convolution_param->set_num_output(6);
+  convolution_param->add_pad(2);
+  convolution_param->add_pad(2);
+  convolution_param->add_pad(1);
+  convolution_param->add_pad(1);
+  convolution_param->mutable_weight_filler()->set_type("constant");
+  convolution_param->mutable_weight_filler()->set_type("constant");
+  convolution_param->mutable_weight_filler()->set_value(1e-3);
+  convolution_param->mutable_bias_filler()->set_type("constant");
+  convolution_param->mutable_bias_filler()->set_value(1e-3);
+  shared_ptr<Layer<Dtype> > layer(
+      new MLUConvolutionDepthwiseLayer<Dtype>(layer_param));
+  layer->SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
+  layer->Reshape_dispatch(this->blob_bottom_vec_, this->blob_top_vec_);
+  layer->Forward(this->blob_bottom_vec_, this->blob_top_vec_);
+  convolution_param->set_group(3);
+  shared_ptr<Layer<Dtype> > conv_layer(
+      new ConvolutionLayer<Dtype>(layer_param));
+  conv_layer->SetUp(this->blob_bottom_vec_, this->conv_top_vec_);
+  conv_layer->Forward(this->blob_bottom_vec_, this->conv_top_vec_);
+  EXPECT_EQ(this->blob_top_->count(), this->conv_top_->count());
+  float err_sum = 0, sum = 0;
+  for (int i = 0; i < this->blob_top_->count(); i++) {
+    err_sum += std::abs(this->blob_top_->cpu_data()[i] -
+        this->conv_top_->cpu_data()[i]);
+    sum += std::abs(this->conv_top_->cpu_data()[i]);
+  }
+  EXPECT_EQ(this->blob_top_2_->count(), this->conv_top_2_->count());
+  float err_sum2 = 0, sum2 = 0;
+  for (int i = 0; i < this->blob_top_2_->count(); i++) {
+    err_sum2 += std::abs(this->blob_top_2_->cpu_data()[i] -
+        this->conv_top_2_->cpu_data()[i]);
+    sum2 += std::abs(this->conv_top_2_->cpu_data()[i]);
+  }
+  EXPECT_LE(err_sum2 / sum2, 4e-2);
+  std::ostringstream stream;
+  stream << "bottom1:" << this->blob_bottom_->shape_string().c_str();
+  BOTTOM(stream);
+  ERR_RATE(err_sum / sum);
+  EVENT_TIME(layer->get_event_time());
+}
 TYPED_TEST(MLUConvolutionDepthwiseLayerTest, Test1x1Convolution) {
   typedef typename TypeParam::Dtype Dtype;
   LayerParameter layer_param;
@@ -534,6 +586,63 @@ TYPED_TEST(MFUSConvolutionDepthwiseLayerTest, TestSimpleConvolution) {
   convolution_param->add_kernel_size(3);
   convolution_param->add_stride(2);
   convolution_param->set_num_output(6);
+  convolution_param->mutable_weight_filler()->set_type("constant");
+  convolution_param->mutable_weight_filler()->set_value(1e-3);
+  convolution_param->mutable_bias_filler()->set_type("constant");
+  convolution_param->mutable_bias_filler()->set_value(0.1);
+  shared_ptr<Layer<Dtype> > layer(
+      new MLUConvolutionDepthwiseLayer<Dtype>(layer_param));
+  layer->SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
+  MFusion<Dtype> fuser;
+  fuser.reset();
+  fuser.addInputs(this->blob_bottom_vec_);
+  fuser.addOutputs(this->blob_top_vec_);
+  layer->Reshape_dispatch(this->blob_bottom_vec_, this->blob_top_vec_);
+  layer->fuse(&fuser);
+  fuser.compile();
+  fuser.forward();
+  convolution_param->set_group(3);
+  shared_ptr<Layer<Dtype> > conv_layer(
+      new ConvolutionLayer<Dtype>(layer_param));
+  conv_layer->SetUp(this->blob_bottom_vec_, this->conv_top_vec_);
+  conv_layer->Forward(this->blob_bottom_vec_, this->conv_top_vec_);
+  EXPECT_EQ(this->blob_top_->count(), this->conv_top_->count());
+  float err_sum = 0, sum = 0;
+  for (int i = 0; i < this->blob_top_->count(); i++) {
+    err_sum += std::abs(this->blob_top_->cpu_data()[i] -
+        this->conv_top_->cpu_data()[i]);
+    sum += std::abs(this->conv_top_->cpu_data()[i]);
+  }
+  EXPECT_EQ(this->blob_top_2_->count(), this->conv_top_2_->count());
+  float err_sum2 = 0, sum2 = 0;
+  for (int i = 0; i < this->blob_top_2_->count(); i++) {
+    err_sum2 += std::abs(this->blob_top_2_->cpu_data()[i] -
+        this->conv_top_2_->cpu_data()[i]);
+    sum2 += std::abs(this->conv_top_2_->cpu_data()[i]);
+  }
+  EXPECT_LE(err_sum2 / sum2, 4e-2);
+  std::ostringstream stream;
+  stream << "bottom1:" << this->blob_bottom_->shape_string().c_str();
+  BOTTOM(stream);
+  ERR_RATE(err_sum / sum);
+  EVENT_TIME(layer->get_event_time());
+}
+TYPED_TEST(MFUSConvolutionDepthwiseLayerTest, TestConvolutiondiffpad) {
+  typedef typename TypeParam::Dtype Dtype;
+  this->blob_bottom_vec_.push_back(this->blob_bottom_2_);
+  this->blob_top_vec_.push_back(this->blob_top_2_);
+  this->conv_top_vec_.push_back(this->conv_top_2_);
+  LayerParameter layer_param;
+  layer_param.set_type("ConvolutionDepthwise");
+  ConvolutionParameter* convolution_param =
+      layer_param.mutable_convolution_param();
+  convolution_param->add_kernel_size(3);
+  convolution_param->add_stride(2);
+  convolution_param->set_num_output(6);
+  convolution_param->add_pad(2);
+  convolution_param->add_pad(2);
+  convolution_param->add_pad(1);
+  convolution_param->add_pad(1);
   convolution_param->mutable_weight_filler()->set_type("constant");
   convolution_param->mutable_weight_filler()->set_value(1e-3);
   convolution_param->mutable_bias_filler()->set_type("constant");

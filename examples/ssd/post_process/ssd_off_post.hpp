@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -30,14 +30,21 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #ifndef EXAMPLES_SSD_POST_PROCESS_SSD_OFF_POST_HPP_
 #define EXAMPLES_SSD_POST_PROCESS_SSD_OFF_POST_HPP_
 #include "ssd_processor.hpp"
+#include "threadPool.h"
+#include "simple_interface.hpp"
 
 template<typename Dtype, template <typename> class Qtype>
 class SsdOffPostProcessor: public SsdProcessor<Dtype, Qtype> {
   public:
-  SsdOffPostProcessor() {}
+  SsdOffPostProcessor() {
+    tp_ = new zl::ThreadPool(SimpleInterface::thread_num);
+  }
   ~SsdOffPostProcessor() {
     delete [] reinterpret_cast<float*>(outCpuPtrs_[0]);
     delete outCpuPtrs_;
+    delete [] reinterpret_cast<char*>(syncCpuPtrs_[0]);
+    delete syncCpuPtrs_;
+    delete tp_;
   }
   virtual void runParallel();
   virtual void runSerial();
@@ -49,5 +56,7 @@ class SsdOffPostProcessor: public SsdProcessor<Dtype, Qtype> {
 
   private:
   Dtype* outCpuPtrs_;
+  Dtype* syncCpuPtrs_;
+  zl::ThreadPool *tp_;
 };
 #endif  // EXAMPLES_SSD_POST_PROCESS_SSD_OFF_POST_HPP_

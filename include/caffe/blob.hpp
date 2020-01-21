@@ -2,7 +2,7 @@
 All modification made by Cambricon Corporation: © 2018--2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -38,7 +38,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "caffe/proto/caffe.pb.h"
 #include "caffe/syncedmem.hpp"
 
-const int kMaxBlobAxes = 4;  ///< max dimensions of a blob, limited by CNML
+const int kMaxBlobAxes = 32;  ///< max dimensions of a blob, limited by CNML
 
 namespace caffe {
 
@@ -110,7 +110,8 @@ class Blob {
                 const int width, BaseDataType cpu_type, BaseDataType mlu_type,
                 cnmlTensorType_t tensor_type);
   Blob(const vector<int>& shape, BaseDataType cpu_type, BaseDataType mlu_type,
-       cnmlTensorType_t tensor_type, cnmlDataOrder_t shape_order = CNML_NCHW);
+       cnmlTensorType_t tensor_type, cnmlDataOrder_t shape_order = CNML_NCHW,
+       vector<int>* dim_strides = nullptr);
 #endif
 
   /// @brief Deprecated; use <code>Reshape(const vector<int>& shape)</code>.
@@ -140,14 +141,16 @@ class Blob {
 #ifdef USE_MLU
   void Reshape(const vector<int>& shape, BaseDataType cpu_type,
                BaseDataType mlu_type, cnmlTensorType_t tensor_type,
-               cnmlDataOrder_t shape_order = CNML_NCHW);
+               cnmlDataOrder_t shape_order = CNML_NCHW,
+               vector<int>* dim_strides = nullptr);
 #endif
 
   void Reshape(const BlobShape& shape);
 #ifdef USE_MLU
   void Reshape(const BlobShape& shape, BaseDataType cpu_type,
                BaseDataType mlu_type, cnmlTensorType_t tensor_type,
-               cnmlDataOrder_t shape_order = CNML_NCHW);
+               cnmlDataOrder_t shape_order = CNML_NCHW,
+               vector<int>* dim_strides = nullptr);
 #endif
   void ReshapeLike(const Blob& other);
   /**
@@ -232,13 +235,17 @@ class Blob {
   }
 
   /// @brief Deprecated legacy shape accessor num: use shape(0) instead.
-  inline int num() const { return LegacyShape(0); }
+  inline int num() const {
+    return num_axes() >= 5 ? shape(0) : LegacyShape(0); }
   /// @brief Deprecated legacy shape accessor channels: use shape(1) instead.
-  inline int channels() const { return LegacyShape(1); }
+  inline int channels() const {
+    return num_axes() >= 5 ? shape(1) : LegacyShape(1); }
   /// @brief Deprecated legacy shape accessor height: use shape(2) instead.
-  inline int height() const { return LegacyShape(2); }
+  inline int height() const {
+    return num_axes() >= 5 ? shape(2) : LegacyShape(2); }
   /// @brief Deprecated legacy shape accessor width: use shape(3) instead.
-  inline int width() const { return LegacyShape(3); }
+  inline int width() const {
+    return num_axes() >= 5 ? shape(3) : LegacyShape(3); }
   inline int LegacyShape(int index) const {
     CHECK_LE(num_axes(), 4)
         << "Cannot use legacy accessors on Blobs with > 4 axes.";
@@ -341,47 +348,55 @@ class Blob {
   const Dtype* mlu_data();
   void set_mlu_data(Dtype* data);
   Dtype* mutable_mlu_data();
+  Dtype* sync_data();
 
   cnmlTensor_t mlu_tensor() {
-    mlu_tensor_desc_.mluCreate();
-    return mlu_tensor_desc_.mlu();
+    tensor_desc_.Create();
+    return tensor_desc_.mlu();
   }
-  cnmlCpuTensor_t cpu_tensor() {
-    mlu_tensor_desc_.cpuCreate();
-    return mlu_tensor_desc_.cpu();
+
+  void set_preprocess(bool preprocess) {
+    tensor_desc_.set_preprocess(preprocess);
+  }
+  bool preprocess() {
+    return tensor_desc_.is_preprocess();
+  }
+  void set_dim_strides(vector<int> dim_strides) {
+    tensor_desc_.set_dim_strides(dim_strides);
   }
   void set_mlu_position(int position) {
-    mlu_tensor_desc_.set_position(position);
+    tensor_desc_.set_position(position);
   }
   void set_mlu_positions(const vector<int>& positions) {
-    mlu_tensor_desc_.set_positions(positions);
+    tensor_desc_.set_positions(positions);
   }
-  const int mlu_position() const { return mlu_tensor_desc_.position(); }
+  const int mlu_position() const { return tensor_desc_.position(); }
   const vector<int>& mlu_positions() const {
-      return mlu_tensor_desc_.positions();
+      return tensor_desc_.positions();
   }
-  void set_mlu_scale(float scale) { mlu_tensor_desc_.set_scale(scale); }
+  void set_mlu_scale(float scale) { tensor_desc_.set_scale(scale); }
   void set_mlu_scales(const vector<float>& scales) {
-     mlu_tensor_desc_.set_scales(scales);
+     tensor_desc_.set_scales(scales);
   }
-  const float mlu_scale() const { return mlu_tensor_desc_.scale(); }
+  const float mlu_scale() const { return tensor_desc_.scale(); }
   const vector<float>& mlu_scales() const {
-      return mlu_tensor_desc_.scales();
+      return tensor_desc_.scales();
   }
   void set_cpu_type(BaseDataType cpu_dtype) {
-    mlu_tensor_desc_.set_cpu_type(cpu_dtype);
+    tensor_desc_.set_cpu_type(cpu_dtype);
   }
-  const BaseDataType cpu_type() const { return mlu_tensor_desc_.cpu_type(); }
+  const BaseDataType cpu_type() const { return tensor_desc_.cpu_type(); }
   void set_mlu_type(BaseDataType mlu_dtype) {
-    mlu_tensor_desc_.set_mlu_type(mlu_dtype);
+    tensor_desc_.set_mlu_type(mlu_dtype);
   }
-  const BaseDataType mlu_type() const { return mlu_tensor_desc_.mlu_type(); }
-  cnmlTensorType_t tensor_type() { return mlu_tensor_desc_.type(); }
-  bool has_mlu_position() const { return mlu_tensor_desc_.has_position(); }
-  bool has_mlu_scale() const { return mlu_tensor_desc_.has_scale(); }
-  void setCpuTensorOrder(cnmlDataOrder_t order) {
-    mlu_tensor_desc_.setCpuTensorOrder(order);
+  const BaseDataType mlu_type() const { return tensor_desc_.mlu_type(); }
+  cnmlTensorType_t tensor_type() { return tensor_desc_.type(); }
+  bool has_mlu_position() const { return tensor_desc_.has_position(); }
+  bool has_mlu_scale() const { return tensor_desc_.has_scale(); }
+  bool is_first_conv_input_blob() const {
+    return tensor_desc_.is_first_conv_input_tensor();
   }
+  const vector<int> mlu_shape() const { return tensor_desc_.mlu_shape(); }
 
 #endif
 
@@ -454,7 +469,8 @@ class Blob {
   int capacity_;  ///< use to check whether to ask for more memory.
 #ifdef USE_MLU
   cnmlDataOrder_t shape_order_;
-  MLUTensorDesc mlu_tensor_desc_;
+  // MLUTensorDesc mlu_tensor_desc_;
+  MLUTensorDesc tensor_desc_;
 #endif
   DISABLE_COPY_AND_ASSIGN(Blob);
 };  // class Blob

@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -42,8 +42,8 @@ template <typename Dtype>
 class MLUSubLayer : public SubLayer<Dtype> {
   public:
   /**
-   *@brief param provides Layerparamter. It has no paramter for now.
-   *
+   *@brief MLU acceleration of SubLayer
+   *       param provides Layerparamter. It has no paramter for now.
    */
   explicit MLUSubLayer(const LayerParameter& param)
       : SubLayer<Dtype>(param), sub_op_ptr_(nullptr) {}
@@ -80,7 +80,6 @@ class MLUSubLayer : public SubLayer<Dtype> {
                            const vector<Blob<Dtype>*>& top);
   cnmlBaseOp_t sub_op_ptr_;
 };
-
 }  // namespace caffe
 #endif  // USE_MLU
 #endif  // INCLUDE_CAFFE_LAYERS_MLU_SUB_LAYER_HPP_

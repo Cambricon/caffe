@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -30,13 +30,13 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #ifndef INCLUDE_CAFFE_LAYERS_MLU_CONV_LAYER_HPP_
 #define INCLUDE_CAFFE_LAYERS_MLU_CONV_LAYER_HPP_
 #ifdef USE_MLU
-
 #include <vector>
-
 #include "caffe/blob.hpp"
 #include "caffe/layer.hpp"
 #include "caffe/proto/caffe.pb.h"
 #include "caffe/layers/conv_layer.hpp"
+#include "caffe/mlu/util.hpp"
+#include "caffe/util/device_alternate.hpp"
 
 /*
  * @brief CNML implementation of ConvolutionLayer.
@@ -50,11 +50,9 @@ class MLUConvolutionLayer : public ConvolutionLayer<Dtype> {
   explicit MLUConvolutionLayer(const LayerParameter& param)
            : ConvolutionLayer<Dtype>(param),
              mlu_conv_op_ptrs_(nullptr), mlu_addpad_op_ptrs_(nullptr),
-             mlu_slice_op_ptrs_(nullptr), mlu_concat_op_ptrs_(nullptr),
              mlu_conv_param_ptr_(nullptr), mlu_convf_param_ptr_(nullptr),
-             mlu_addpad_param_ptr_(nullptr), mlu_slice_param_ptr_(nullptr),
-             mlu_concat_param_ptr_(nullptr), add_pad_(false),
-             depthwise_param_ptr_(nullptr), std_ptr_(nullptr) { }
+             mlu_addpad_param_ptr_(nullptr), add_pad_(false),
+             depthwise_param_ptr_(nullptr), mean_quant_param(nullptr) { }
   virtual void LayerSetUp(const vector<Blob<Dtype>*>& bottom,
                           const vector<Blob<Dtype>*>& top);
   virtual ~MLUConvolutionLayer();
@@ -70,10 +68,33 @@ class MLUConvolutionLayer : public ConvolutionLayer<Dtype> {
     }
   }
 
+void bindDataAndSetComputingDataType(shared_ptr<Blob<Dtype>> blob,
+                               cnmlBaseOp_t op, BaseDataType type);
   protected:
   bool dilate() {
     return (this->dilation_.cpu_data()[0] != 1 || this->dilation_.cpu_data()[1] != 1);
   }
+
+  inline void SetBottomPositionScale(cnmlBaseOp_t& op_ptr,
+                              cnmlQuantizedParam_t& quant_param,
+                              Blob<Dtype>* blob_in, int idx) {
+    if (this->layer_param_.bottom_mlu_dtype_size() > idx) {
+      float scale = this->layer_param_.bottom_mlu_dtype(idx).scale_size() ?
+        this->layer_param_.bottom_mlu_dtype(idx).scale(0) : 1.0;
+      BaseDataType mlu_dtype = this->layer_param_.bottom_mlu_dtype(idx).has_type() ?
+        this->layer_param_.bottom_mlu_dtype(idx).type() :
+        this->layer_param_.blobs_dtype(idx).type();
+      blob_in->set_mlu_position(this->layer_param_.bottom_mlu_dtype(idx).position(0));
+      blob_in->set_mlu_scale(scale);
+      MLU_CHECK(cnmlCreateQuantizedParam(&quant_param,
+                this->layer_param_.bottom_mlu_dtype(idx).position(0),
+                scale,
+                0.0));
+      MLU_CHECK(cnmlSetOperationComputingDataType(op_ptr, blob_in->mlu_tensor(),
+                              to_cnml_dtype(mlu_dtype), quant_param));
+    }
+  }
+
   inline void SetBlobPosition(Blob<Dtype>* blob_in) {
     if (this->layer_param_.blobs_dtype_size() > 0 &&
         (this->layer_param_.blobs_dtype(0).position_size() ||
@@ -102,23 +123,7 @@ class MLUConvolutionLayer : public ConvolutionLayer<Dtype> {
       }
     }
   }
-  inline void SetBottomPosition(Blob<Dtype>* blob_in, int idx) {
-    if (this->layer_param_.bottom_mlu_dtype_size() > idx) {
-      if (this->layer_param_.bottom_mlu_dtype(idx).position_size()) {
-        blob_in->set_mlu_position(this->layer_param_.bottom_mlu_dtype(idx).position(0));
-      }
-      if (this->layer_param_.bottom_mlu_dtype(idx).scale_size()) {
-        blob_in->set_mlu_scale(this->layer_param_.bottom_mlu_dtype(idx).scale(0));
-      }
-    }
-  }
-  inline void SetMeanPosition(Blob<Dtype>* blob_in) {
-    BlobDataType blob_dtype;
-    blob_dtype = get_int8_info<Dtype>(*blob_in, this->layer_param_);
-    blob_in->set_mlu_type(DT_INT8);
-    blob_in->set_mlu_position(blob_dtype.position(0));
-    blob_in->set_mlu_scale(blob_dtype.scale(0));
-  }
+
   virtual void Forward_mlu(const vector<Blob<Dtype>*>& bottom,
                            const vector<Blob<Dtype>*>& top);
   virtual void MLUCreateOpBindData(const vector<Blob<Dtype>*>& bottom,
@@ -133,25 +138,19 @@ class MLUConvolutionLayer : public ConvolutionLayer<Dtype> {
   size_t bottom_size_;
   cnmlBaseOp_t* mlu_conv_op_ptrs_;
   cnmlBaseOp_t* mlu_addpad_op_ptrs_;
-  cnmlBaseOp_t* mlu_slice_op_ptrs_;
-  cnmlBaseOp_t* mlu_concat_op_ptrs_;
   cnmlConvOpParam_t mlu_conv_param_ptr_;
   cnmlConvFirstOpParam_t mlu_convf_param_ptr_;
   cnmlAddPadOpParam_t mlu_addpad_param_ptr_;
-  cnmlSplitOpParam_t mlu_slice_param_ptr_;
-  cnmlConcatOpParam_t mlu_concat_param_ptr_;
   vector<Blob<Dtype>*> addpad_;
   bool add_pad_;
-  vector<vector<Blob<Dtype>*>> slice_;
-  vector<vector<Blob<Dtype>*>> concat_;
   vector<Blob<Dtype>*> weight_blob_;
   Blob<Dtype> std_;
-  cnmlSparseMode_t mluSparse_;
   // depthwise
   bool is_depthwise_;
   int multiplier_;
   cnmlConvDepthwiseOpParam_t depthwise_param_ptr_;
-  float* std_ptr_;
+  vector<cnmlQuantizedParam_t> input_quant_params;
+  cnmlQuantizedParam_t mean_quant_param;
 };
 }  // namespace caffe
 #endif  // USE_MLU

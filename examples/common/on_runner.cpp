@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -40,6 +40,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "include/on_runner.hpp"
 #include "include/pipeline.hpp"
 #include "include/common_functions.hpp"
+#include "include/simple_interface.hpp"
 
 using std::string;
 using std::vector;
@@ -48,7 +49,6 @@ template <typename Dtype, template <typename> class Qtype>
 OnRunner<Dtype, Qtype>::OnRunner(const string& onlinemodel,
                       const string& onlineweights,
                       const int& ThrID,
-                      const int& data_parallel,
                       const int& deviceId,
                       const int& deviceSize) {
 #ifdef USE_MLU
@@ -58,10 +58,14 @@ OnRunner<Dtype, Qtype>::OnRunner(const string& onlinemodel,
   this->runTime_ = 0;
   //  config like mmode must be set before net initialization
   setupConfig(this->threadId_, deviceId, deviceSize);
-  this->dataParallel_ = data_parallel;
-  net_ = new caffe::Net<float>(onlinemodel, caffe::TEST);
+
+  caffe::NetParameter param;
+  ReadNetParamsFromTextFileOrDie(onlinemodel, &param);
+  param.mutable_state()->set_phase(caffe::TEST);
+  param.set_opt_level(FLAGS_opt_level);
+  net_ = new caffe::Net<float>(param);
   net_->CopyTrainedLayersFrom(onlineweights);
-  CHECK_EQ(net_->input_blobs().size(), 1) << "doesn't support multiple input";
+  // CHECK_EQ(net_->input_blobs().size(), 1) << "doesn't support multiple input";
   // for mmode = MLU, Reshape will compile op
   // so that we can use net's tensor for memcpy
   net_->Reshape();
@@ -79,21 +83,42 @@ OnRunner<Dtype, Qtype>::OnRunner(const string& onlinemodel,
   this->outChannel_ = outputBlob->channels();
   this->outHeight_ = outputBlob->height();
   this->outWidth_ = outputBlob->width();
-  this->inCount_ = inputBlob->count();
-  this->outCount_ = outputBlob->count();
+  this->inCounts_.push_back(inputBlob->count());
+  this->outCounts_.push_back(outputBlob->count());
   for (int i = 0; i < FLAGS_fifosize; i++) {
     auto inputMluTensorPtr = net_->input_blobs()[0]->mlu_tensor();
     auto outputMluTensorPtr = net_->output_blobs()[0]->mlu_tensor();
+    size_t input_mlu_size, output_mlu_size;
+    MLU_CHECK(cnmlGetTensorSize_V2(inputMluTensorPtr, &input_mlu_size));
+    MLU_CHECK(cnmlGetTensorSize_V2(outputMluTensorPtr, &output_mlu_size));
+    Dtype* inputMluPtr = nullptr;
+    CNRT_CHECK(cnrtMalloc(reinterpret_cast<void**>(&inputMluPtr), input_mlu_size));
+    Dtype* outputMluPtr = nullptr;
+    CNRT_CHECK(cnrtMalloc(reinterpret_cast<void**>(&outputMluPtr), output_mlu_size));
+    void* inputSyncPtr = nullptr;
+    inputSyncPtr = reinterpret_cast<void*>(malloc(input_mlu_size));
+    void* inputSyncTmpPtr = nullptr;
+    if (inputBlob->is_first_conv_input_blob()) {
+      size_t tmpSyncSize = input_mlu_size / 4 * 3;
+      inputSyncTmpPtr = reinterpret_cast<void*>(
+          malloc(tmpSyncSize));
+    }
+    void* outputSyncPtr = nullptr;
+    outputSyncPtr = reinterpret_cast<void*>(malloc(output_mlu_size));
 
-    Dtype* inputMluPtr = reinterpret_cast<Dtype*>
-                     (cnmlMallocBatchBuffer(inputMluTensorPtr, this->dataParallel_));
-    Dtype* outputMluPtr = reinterpret_cast<Dtype*>
-                      (cnmlMallocBatchBuffer(outputMluTensorPtr, this->dataParallel_));
     // save the Malloced memory to delete later
     allocatedMLUPtrs_.push_back(inputMluPtr);
     allocatedMLUPtrs_.push_back(outputMluPtr);
+    allocatedSyncPtrs_.push_back(reinterpret_cast<Dtype*>(inputSyncPtr));
+    allocatedSyncPtrs_.push_back(reinterpret_cast<Dtype*>(outputSyncPtr));
     this->pushFreeInputData(inputMluPtr);
     this->pushFreeOutputData(outputMluPtr);
+    this->pushFreeInputSyncData(reinterpret_cast<Dtype*>(inputSyncPtr));
+    this->pushFreeOutputSyncData(reinterpret_cast<Dtype*>(outputSyncPtr));
+    if (inputBlob->is_first_conv_input_blob()) {
+      allocatedSyncTmpPtrs_.push_back(reinterpret_cast<Dtype*>(inputSyncTmpPtr));
+      this->pushFreeInputSyncTmpData(reinterpret_cast<Dtype*>(inputSyncTmpPtr));
+    }
   }
   if (FLAGS_mmode == std::string("MFUS"))
     caffe::Caffe::freeQueue();
@@ -115,9 +140,13 @@ OnRunner<Dtype, Qtype>::OnRunner(const string& onlinemodel,
   }
 
   //  config like mmode must be set before net initialization
-  net_ = new caffe::Net<float>(onlinemodel, caffe::TEST);
+  caffe::NetParameter param;
+  ReadNetParamsFromTextFileOrDie(onlinemodel, &param);
+  param.mutable_state()->set_phase(caffe::TEST);
+  param.set_opt_level(FLAGS_opt_level);
+  net_ = new caffe::Net<float>(param);
   net_->CopyTrainedLayersFrom(onlineweights);
-  CHECK_EQ(net_->input_blobs().size(), 1) << "doesn't support multiple input";
+  // CHECK_EQ(net_->input_blobs().size(), 1) << "doesn't support multiple input";
 
   auto inputBlob = net_->input_blobs()[0];
   auto outputBlob = net_->output_blobs()[0];
@@ -130,11 +159,11 @@ OnRunner<Dtype, Qtype>::OnRunner(const string& onlinemodel,
   this->outChannel_ = outputBlob->channels();
   this->outHeight_ = outputBlob->height();
   this->outWidth_ = outputBlob->width();
-  this->inCount_ = inputBlob->count();
-  this->outCount_ = outputBlob->count();
+  this->inCounts_.push_back(inputBlob->count());
+  this->outCounts_.push_back(outputBlob->count());
   for (int i = 0; i < 1; i++) {
-    Dtype* inputCpuPtr = new Dtype[ this->inCount_ ];
-    Dtype* outputCpuPtr = new Dtype[ this->outCount_ ];
+    Dtype* inputCpuPtr = new Dtype[this->inCounts_[0]];
+    Dtype* outputCpuPtr = new Dtype[this->outCounts_[0]];
     // save the Malloced memory to delete later
     allocatedCpuPtrs_.push_back(inputCpuPtr);
     allocatedCpuPtrs_.push_back(outputCpuPtr);
@@ -152,11 +181,19 @@ OnRunner<Dtype, Qtype>::~OnRunner() {
   for (auto ptr : allocatedMLUPtrs_) {
 #ifdef USE_MLU
     if (ptr != nullptr)
-      cnmlFreeBuffer(ptr);
+      CNRT_CHECK(cnrtFree(ptr));
 #endif
   }
   for (auto ptr : allocatedCpuPtrs_) {
       delete [] ptr;
+  }
+  for (auto ptr : allocatedSyncPtrs_) {
+    if (ptr != nullptr)
+      free(ptr);
+  }
+  for (auto ptr : allocatedSyncTmpPtrs_) {
+    if (ptr != nullptr)
+      free(ptr);
   }
 }
 
@@ -170,12 +207,19 @@ void OnRunner<Dtype, Qtype>::runParallel() {
   cnrtCreateNotifier(&notifierEnd);
 
   while (true) {
+    auto inputBlob = net_->input_blobs()[0];
+    auto outputBlob = net_->output_blobs()[0];
     Dtype* inputMluPtr = this->popValidInputData();
+    Dtype* inputSyncPtr = this->popValidInputSyncData();
+    Dtype* inputSyncTmpPtr = nullptr;
+    if (inputBlob->is_first_conv_input_blob())
+      inputSyncTmpPtr = this->popValidInputSyncTmpData();
+
     if (nullptr == inputMluPtr) break;  // no more work to do, exit
 
     Dtype* outputMluPtr = this->popFreeOutputData();
-    auto inputBlob = net_->input_blobs()[0];
-    auto outputBlob = net_->output_blobs()[0];
+    Dtype* outputSyncPtr = this->popFreeOutputSyncData();
+
     inputBlob->set_mlu_data(inputMluPtr);
     outputBlob->set_mlu_data(outputMluPtr);
 
@@ -185,18 +229,24 @@ void OnRunner<Dtype, Qtype>::runParallel() {
     net_->ForwardPrefilled();
 
     cnrtPlaceNotifier(notifierEnd, caffe::Caffe::queue());
+    CNRT_CHECK(cnrtSyncQueue(caffe::Caffe::queue()));
     cnrtNotifierDuration(notifierBeginning, notifierEnd, &eventTimeUse);
     this->runTime_ +=  eventTimeUse;
     printfMluTime(eventTimeUse);
 
     this->pushValidOutputData(outputMluPtr);
+    this->pushValidOutputSyncData(outputSyncPtr);
     this->pushFreeInputData(inputMluPtr);
+    this->pushFreeInputSyncData(inputSyncPtr);
+    if (inputBlob->is_first_conv_input_blob())
+      this->pushFreeInputSyncTmpData(inputSyncTmpPtr);
   }
 
   cnrtDestroyNotifier(&notifierBeginning);
   cnrtDestroyNotifier(&notifierEnd);
 #endif
   this->pushValidOutputData(static_cast<Dtype*>(nullptr));
+  this->pushValidOutputSyncData(static_cast<Dtype*>(nullptr));
 #ifdef USE_MLU
   caffe::Caffe::freeQueue();
 #endif
@@ -212,11 +262,26 @@ void OnRunner<Dtype, Qtype>::runSerial() {
   Timer timer;
 #endif
 
+#ifdef USE_MLU
+  float eventTimeUse;
+  cnrtNotifier_t notifierBeginning, notifierEnd;
+  if (caffe::Caffe::mode() != caffe::Caffe::CPU) {
+    cnrtCreateNotifier(&notifierBeginning);
+    cnrtCreateNotifier(&notifierEnd);
+    cnrtPlaceNotifier(notifierBeginning, caffe::Caffe::queue());
+  }
+#endif
+
   net_->ForwardPrefilled();
 
 #ifdef USE_MLU
-  if (caffe::Caffe::mode() != caffe::Caffe::CPU)
+  if (caffe::Caffe::mode() != caffe::Caffe::CPU) {
+    cnrtPlaceNotifier(notifierEnd, caffe::Caffe::queue());
     cnrtSyncQueue(caffe::Caffe::queue());
+    cnrtNotifierDuration(notifierBeginning, notifierEnd, &eventTimeUse);
+    this->runTime_ +=  eventTimeUse;
+    printfMluTime(eventTimeUse);
+  }
 #endif
 
 #ifdef DEBUG
@@ -224,6 +289,12 @@ void OnRunner<Dtype, Qtype>::runSerial() {
 #endif
 
   this->pushFreeInputData(inputCpuPtr);
+#ifdef USE_MLU
+  if (caffe::Caffe::mode() != caffe::Caffe::CPU) {
+    cnrtDestroyNotifier(&notifierBeginning);
+    cnrtDestroyNotifier(&notifierEnd);
+  }
+#endif
 }
 
 INSTANTIATE_ON_CLASS(OnRunner);

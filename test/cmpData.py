@@ -4,7 +4,6 @@
 from __future__ import division
 import sys
 import os
-import numpy as np
 
 
 def cmpData(filenamea, filenameb):
@@ -24,33 +23,30 @@ def cmpData(filenamea, filenameb):
     lineCount += 1
     rfa = open(filenamea, "r")
     rfb = open(filenameb, "r")
-    numa_list = []
-    numb_list = []
-    err_list = []
-    total_err = 0.0
-    numerator = 0.0
-    denominator = 0.0
+    totalErr = 0.0
+    totalNum = 0.0
+    errorList = []
     for i in range(lineCount):
-        numa_list.append(float(rfa.readline().strip("\n").split(" ")[-1]))
-        numb_list.append(float(rfb.readline().strip("\n").split(" ")[-1]))
-    for a,b in zip(numa_list,numb_list):
-        if not (a == 0 and b == 0):
-            err_list.append(abs(a-b)/((a ** 2 + b ** 2) ** 0.5))
-        else:
-            err_list.append(0)
-    std = np.std(np.array(err_list))
-    if any(numa_list) or any(numb_list):
-        for a,b in zip(numa_list,numb_list):
-            numerator += (a-b) ** 2
-            denominator += a ** 2 + b ** 2
-        total_err = (numerator / denominator) ** 0.5
+        numa = float(rfa.readline().strip("\n").split(" ")[-1])
+        numb = float(rfb.readline().strip("\n").split(" ")[-1])
+        totalErr += abs(numa - numb)
+        totalNum += abs(numb)
+        if numb != numa:
+            errorList.append(i)
+
     rfa.close()
     rfb.close()
 
-    return total_err,std
+    return totalErr,totalNum,errorList
 
 
 if __name__ == "__main__":
-    totalErr,std = cmpData(sys.argv[1], sys.argv[2])
-    print "errRate = %f" % totalErr
-    print "std = %f(should be close to 0)" % std
+    totalErr,totalNum, errorList = cmpData(sys.argv[1], sys.argv[2])
+    # sometimes the output is all zero.
+    if totalNum == 0.0:
+        print "errRate = %f" % totalErr
+    else:
+        print "errRate = %f" % (totalErr/totalNum)
+
+#    if len(errorList) > 0:
+#        print "errorList[0] %f" % errorList[0]

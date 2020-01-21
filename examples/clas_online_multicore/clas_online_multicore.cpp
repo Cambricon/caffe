@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018--2019 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -39,6 +39,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "on_runner.hpp"
 #include "clas_on_post.hpp"
 #include "common_functions.hpp"
+#include "simple_interface.hpp"
 
 using std::vector;
 using std::queue;
@@ -46,6 +47,7 @@ using std::string;
 using std::thread;
 using std::stringstream;
 
+typedef DataProvider<float, BlockingQueue> DataProviderT;
 typedef OnDataProvider<float, BlockingQueue> OnDataProviderT;
 typedef OnRunner<float, BlockingQueue> OnRunnerT;
 typedef ClassOnPostProcessor<float, BlockingQueue> ClassOnPostProcessorT;
@@ -73,6 +75,11 @@ int main(int argc, char* argv[]) {
   }
   CHECK(FLAGS_mmode != std::string("CPU")) << "CPU mode is not supported!";
 
+  SimpleInterface& simpleInterface = SimpleInterface::getInstance();
+  // if simple_compile option has been specified to 1 by user, simple compile
+  int provider_num = 1;
+  simpleInterface.setFlag(true);
+  provider_num = SimpleInterface::data_provider_num_;
   std::stringstream sdevice(FLAGS_mludevice);
   vector<int> deviceIds_;
   std::string item;
@@ -84,23 +91,32 @@ int main(int argc, char* argv[]) {
 
   cnmlInit(0);
 
-  ImageReader img_reader(FLAGS_images, totalThreads);
+  ImageReader img_reader(FLAGS_images, totalThreads * provider_num);
   auto&& imageList = img_reader.getImageList();
   int imageNum = img_reader.getImageNum();
 
   vector<thread*> stageThreads;
   vector<PipelineT*> pipelines;
+  vector<DataProviderT*> providers;
   for (int i = 0; i < totalThreads; i++) {
     int devideId = deviceIds_[i % deviceIds_.size()];
-    auto provider = new OnDataProviderT(FLAGS_meanfile, FLAGS_meanvalue,
-                                        imageList[i]);
+    DataProviderT* provider;
+    PipelineT* pipeline;
+
+    providers.clear();
+    // provider_num is 1 for flexible compile.
+    for (int j = 0; j < provider_num; j++) {
+      provider = new OnDataProviderT(FLAGS_meanfile, FLAGS_meanvalue,
+                                        imageList[provider_num * i + j]);
+      providers.push_back(provider);
+    }
 
     auto runner = new OnRunnerT(FLAGS_model, FLAGS_weights,
-                                i, FLAGS_dataparallel, devideId, deviceIds_.size());
+                                i, devideId, deviceIds_.size());
 
     auto postprocessor = new ClassOnPostProcessorT();
 
-    auto pipeline = new PipelineT(provider, runner, postprocessor);
+    pipeline = new PipelineT(providers, runner, postprocessor);
     stageThreads.push_back(new thread(&PipelineT::runParallel, pipeline));
     pipelines.push_back(pipeline);
   }
@@ -125,8 +141,10 @@ int main(int argc, char* argv[]) {
     acc5 += pipelines[i]->postProcessor()->top5();
     mluTime += pipelines[i]->runner()->runTime();
   }
+  int batchsize = pipelines[0]->runner()->n();
   printfAccuracy(imageNum, acc1, acc5);
-  printPerf(imageNum, execTime, mluTime, totalThreads);
+  printPerf(imageNum, execTime, mluTime, totalThreads, batchsize);
+  saveResult(imageNum, acc1, acc5, (-1), mluTime, execTime, 1, batchsize);
 
   caffe::Caffe::freeQueue();
   for (auto iter : pipelines)

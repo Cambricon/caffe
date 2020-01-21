@@ -2,7 +2,7 @@
 All modification made by Cambricon Corporation: © 2018--2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -29,23 +29,21 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #ifndef INCLUDE_CAFFE_LAYERS_MLU_FLATTEN_LAYER_HPP_
 #define INCLUDE_CAFFE_LAYERS_MLU_FLATTEN_LAYER_HPP_
-
 #ifdef USE_MLU
-
 #include <vector>
-
 #include "caffe/blob.hpp"
 #include "caffe/layer.hpp"
 #include "caffe/proto/caffe.pb.h"
-
 #include "caffe/layers/flatten_layer.hpp"
 
 namespace caffe {
 
 /**
- * @brief Reshapes the input Blob into flat vectors.
- *        Because this layer does not change the input values,
- *        use ReshapeOp to implement the MLUFlattenLayer.
+ * @brief MLU acceleration of FlattenLayer
+ * Note: because this layer does not change the input values -- merely the
+ * dimensions -- it can simply copy the input. The copy happens "virtually"
+ * (thus taking effectively 0 real time) by setting, in Forward, the data
+ * pointer of the top Blob to that of the bottom Blob (see Blob::ShareData)
  */
 template <typename Dtype>
 class MLUFlattenLayer : public FlattenLayer<Dtype> {
@@ -53,7 +51,11 @@ class MLUFlattenLayer : public FlattenLayer<Dtype> {
   explicit MLUFlattenLayer(const LayerParameter& param)
       : FlattenLayer<Dtype>(param),
         reshape_op_ptr_(nullptr),
-        reshape_param_(nullptr) {}
+        reshape_param_(nullptr),
+        transpose_d2h_op_(nullptr),
+        transpose_d2h_param_(nullptr),
+        transpose_h2d_op_(nullptr),
+        transpose_h2d_param_(nullptr) {}
 
   virtual void LayerSetUp(const vector<Blob<Dtype>*>& bottom,
                           const vector<Blob<Dtype>*>& top);
@@ -72,6 +74,13 @@ class MLUFlattenLayer : public FlattenLayer<Dtype> {
   virtual void MLUCompileOp();
   cnmlBaseOp_t reshape_op_ptr_;
   cnmlReshapeOpParam_t reshape_param_;
+  cnmlBaseOp_t transpose_d2h_op_;
+  cnmlNdTransposeOpParam_t transpose_d2h_param_;
+  cnmlBaseOp_t transpose_h2d_op_;
+  cnmlNdTransposeOpParam_t transpose_h2d_param_;
+  Blob<Dtype> transpose_d2h_blob_;
+  Blob<Dtype> transpose_h2d_blob_;
+  int length;
 };
 }  // namespace caffe
 

@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -32,19 +32,15 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
 #endif  // USE_OPENCV
-
-#ifndef INCLUDE_CAFFE_UTIL_BBOX_HPP_
-#define INCLUDE_CAFFE_UTIL_BBOX_HPP_
-
+#ifndef INCLUDE_CAFFE_UTIL_BBOX_HPP_  // NOLINT
+#define INCLUDE_CAFFE_UTIL_BBOX_HPP_  // NOLINT
 #include <stdint.h>
 #include <cmath>  // for std::fabs and std::signbit
 #include <map>
 #include <string>
 #include <utility>
 #include <vector>
-
 #include "glog/logging.h"
-
 #include "caffe/caffe.hpp"
 
 namespace caffe {
@@ -191,10 +187,10 @@ class PredictionResult {
 };
 template <typename Dtype>
 void class_index_and_score(Dtype* input, int classes,
-                           PredictionResult<Dtype>* predict) {
+                           float confidence_threshold_,
+                           map<int, float> *prob_index) {
   Dtype sum = 0;
   Dtype large = input[0];
-  int classIndex = 0;
   for (int i = 0; i < classes; ++i) {
     if (input[i] > large) large = input[i];
   }
@@ -208,16 +204,17 @@ void class_index_and_score(Dtype* input, int classes,
     input[i] = input[i] / sum;
   }
   large = input[0];
-  classIndex = 0;
 
   for (int i = 0; i < classes; ++i) {
     if (input[i] > large) {
       large = input[i];
-      classIndex = i;
     }
   }
-  predict->classType = classIndex;
-  predict->classScore = large;
+  for (int i = 0; i < classes; i++) {
+    if (input[i] > confidence_threshold_) {
+      (*prob_index)[i] = input[i];
+    }
+  }
 }
 template <typename Dtype>
 void get_region_box(Dtype* x, PredictionResult<Dtype>* predict,
@@ -231,32 +228,54 @@ void get_region_box(Dtype* x, PredictionResult<Dtype>* predict,
 
 template <typename Dtype>
 void ApplyNms(vector<PredictionResult<Dtype> >* boxes, vector<int>* idxes,
-              Dtype threshold) {
-  map<int, int> idx_map;
-  for (int i = 0; i < boxes->size() - 1; ++i) {
-    if (idx_map.find(i) != idx_map.end()) {
-      continue;
-    }
-    for (int j = i + 1; j < boxes->size(); ++j) {
-      if (idx_map.find(j) != idx_map.end()) {
-        continue;
-      }
-      NormalizedBBox Bbox1, Bbox2;
-      setNormalizedBBox(&Bbox1, (*boxes)[i].x,
-          (*boxes)[i].y, (*boxes)[i].w, (*boxes)[i].h);
-      setNormalizedBBox(&Bbox2, (*boxes)[j].x,
-          (*boxes)[j].y, (*boxes)[j].w, (*boxes)[j].h);
-
-      float overlap = JaccardOverlap(Bbox1, Bbox2, true);
-
-      if (overlap >= threshold) {
-        idx_map[j] = 1;
+              Dtype threshold, vector< vector<float>>* result, int b, int num_classes_) {
+  float fScale = 1.0;
+  for (int k = 0; k < num_classes_; k++) {
+    vector<PredictionResult<Dtype>> cur_boxes;
+    for (int i = 0; i < (*boxes).size(); i++) {
+      if ((*boxes)[i].classType == k) {
+        cur_boxes.push_back((*boxes)[i]);
       }
     }
-  }
-  for (int i = 0; i < boxes->size(); ++i) {
-    if (idx_map.find(i) == idx_map.end()) {
-      idxes->push_back(i);
+    if (cur_boxes.empty()) continue;
+    std::sort(cur_boxes.begin(), cur_boxes.end(),
+        [](const PredictionResult<Dtype>& pa, const PredictionResult<Dtype>& pb){
+          float diff = pa.confidence - pb.confidence;
+          if (diff > 0) return 1;
+          return 0;
+        });
+
+    map<int, int> idx_map;
+    for (int i = 0; i < cur_boxes.size() - 1; ++i) {
+      if (idx_map.find(i) != idx_map.end()) continue;
+      for (int j = i + 1; j < cur_boxes.size(); ++j) {
+        if (idx_map.find(j) != idx_map.end()) continue;
+        NormalizedBBox Bbox1, Bbox2;
+        setNormalizedBBox(&Bbox1, cur_boxes[i].x,
+            cur_boxes[i].y, cur_boxes[i].w*fScale, cur_boxes[i].h*fScale);
+        setNormalizedBBox(&Bbox2, cur_boxes[j].x,
+            cur_boxes[j].y, cur_boxes[j].w*fScale, cur_boxes[j].h*fScale);
+        float overlap = JaccardOverlap(Bbox1, Bbox2, true);
+        if (overlap >= threshold) {
+          if (cur_boxes[i].confidence > cur_boxes[j].confidence) idx_map[j] = 1;
+          else
+            idx_map[i] = 1;
+        }
+      }
+    }
+
+    for (int i = 0; i < cur_boxes.size(); ++i) {
+      if (idx_map.find(i) == idx_map.end()) {
+        std::vector<float> tmp;
+        tmp.push_back(b);
+        tmp.push_back(cur_boxes[i].classType);
+        tmp.push_back(cur_boxes[i].confidence);
+        tmp.push_back(cur_boxes[i].x);
+        tmp.push_back(cur_boxes[i].y);
+        tmp.push_back(cur_boxes[i].w);
+        tmp.push_back(cur_boxes[i].h);
+        (*result).push_back(tmp);
+      }
     }
   }
 }

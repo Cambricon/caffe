@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -162,7 +162,7 @@ typedef typename TypeParam::Dtype Dtype;
       layer.Reshape_dispatch(this->blob_bottom_vec_, this->blob_top_vec_);
       layer.Forward(this->blob_bottom_vec_, this->blob_top_vec_);
       float rate = caffe_cyclemult(this->blob_bottom_, this->blob_bottom_mult_,
-          this->blob_top_, 5e-3);
+          this->blob_top_, 8e-3);
       OUTPUT("bottom1", blob_bottom_->shape_string().c_str());
       OUTPUT("bottom2", blob_bottom_mult_->shape_string().c_str());
       ERR_RATE(rate);
@@ -241,7 +241,7 @@ typedef typename TypeParam::Dtype Dtype;
       fuser.forward();
 
       float rate = caffe_cyclemult(this->blob_bottom_, this->blob_bottom_mult_,
-          this->blob_top_, 5e-3);
+          this->blob_top_, 8e-3);
       OUTPUT("bottom1", blob_bottom_->shape_string().c_str());
       OUTPUT("bottom2", blob_bottom_mult_->shape_string().c_str());
       ERR_RATE(rate);

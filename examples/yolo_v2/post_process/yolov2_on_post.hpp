@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -31,20 +31,29 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define EXAMPLES_YOLO_V2_POST_PROCESS_YOLOV2_ON_POST_HPP_
 #include "yolov2_processor.hpp"
 #include "caffe/caffe.hpp"
+#include "threadPool.h"
+#include "simple_interface.hpp"
 
 template<typename Dtype, template <typename> class Qtype>
 class YoloV2OnPostProcessor: public YoloV2Processor<Dtype, Qtype> {
   public:
-  YoloV2OnPostProcessor() {}
-  ~YoloV2OnPostProcessor() {}
+  YoloV2OnPostProcessor() : outCpuPtrs_(nullptr) {
+    tp_ = new zl::ThreadPool(SimpleInterface::thread_num);
+  }
+  ~YoloV2OnPostProcessor() {
+    if (outCpuPtrs_) delete [] outCpuPtrs_;
+    delete tp_;
+  }
   virtual void runParallel();
   virtual void runSerial();
 
   protected:
-  vector<vector<vector<float> > > getResults(vector<cv::Mat> *imgs,
-                                             vector<string> *img_names);
+  vector<vector<float>> getResults(vector<cv::Mat> *imgs,
+                                   vector<string> *img_names);
 
   private:
   Dtype* outCpuPtrs_;
+  zl::ThreadPool *tp_;
+  Dtype* resultDataPtr_;
 };
 #endif  // EXAMPLES_YOLO_V2_POST_PROCESS_YOLOV2_ON_POST_HPP_

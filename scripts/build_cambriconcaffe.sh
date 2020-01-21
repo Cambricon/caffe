@@ -4,7 +4,8 @@ shopt -s nocasematch
 function usage
 {
     echo "Usage:"
-    echo "  $0 [-help|-h] [-debug|-d] [-release|-r] [-clean|-c] [-platform|-p x86|arm32|arm64]"
+    echo "  $0 [-help|-h] [-debug|-d] [-release|-r] [-clean|-c] [-platform|-p x86|aarch64]
+        [-job|-j <jobnum>]"
     echo ""
     echo "  Parameter description:"
     echo "    -help or -h: usage instructions."
@@ -12,6 +13,7 @@ function usage
     echo "    -release or -r: build cambricon caffe with release version, the default option is release."
     echo "    -clean or -c: clear build folder and rebuild caffe."
     echo "    -platform or -p: specity platform for cambricon caffe, the default platform is x86."
+    echo "    -job or -j: specifies the number of jobs to compile concurrently."
 }
 
 function checkMluHome
@@ -61,6 +63,10 @@ do
             PLATFORM="$2"
             shift
             ;;
+        -job | -j)
+           JOB_NUM="$2"
+            shift
+            ;;
         *)
             echo "[ERROR] Unknown option: $arg"
             usage
@@ -82,19 +88,17 @@ else
         rm -fr $BUILD_DIR/*
     fi
 fi
-
 export CAFFE_DIR
 export BUILD_DIR
 export BUILD_TYPE
 export PLATFORM
+export JOB_NUM
 
 # please make sure this is the last step due to that user can get the compile status
 if [ "$PLATFORM" == "x86" ]; then
     $CAFFE_DIR/scripts/build_caffe_x86.sh
-elif [ "$PLATFORM" == "arm32" ]; then
-    $CAFFE_DIR/scripts/build_caffe_arm32.sh
-elif [ "$PLATFORM" == "arm64" ]; then
-    $CAFFE_DIR/scripts/build_caffe_arm64.sh
+elif [ "$PLATFORM" == "aarch64" ]; then
+    $CAFFE_DIR/scripts/build_caffe_aarch64.sh
 else
     echo "[ERROR] Invalid platform: $PLATFORM. Exit."
     usage

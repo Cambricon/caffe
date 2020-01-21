@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -30,21 +30,24 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #ifdef USE_MLU
 #include<vector>
 #include "caffe/layers/mlu_softmax_layer.hpp"
+
 namespace caffe {
 
 template <typename Dtype>
 void MLUSoftmaxLayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& bottom,
-                                      const vector<Blob<Dtype>*>& top) {
+                                        const vector<Blob<Dtype>*>& top) {
   SoftmaxLayer<Dtype>::LayerSetUp(bottom, top);
+  this->softmax_axis_ =
+    bottom[0]->CanonicalAxisIndex(this->layer_param_.softmax_param().axis());
 }
 
 template <typename Dtype>
 void MLUSoftmaxLayer<Dtype>::Reshape_tensor(const vector<Blob<Dtype>*>& bottom,
                                             const vector<Blob<Dtype>*>& top) {
-  this->softmax_axis_ =
-    bottom[0]->CanonicalAxisIndex(this->layer_param_.softmax_param().axis());
   BaseDataType cpu_dtype = sizeof(Dtype) == 4 ? DT_FLOAT32 : DT_DOUBLE;
-  BaseDataType mlu_dtype = DT_FLOAT16;
+  BaseDataType mlu_dtype = this->layer_param_.has_top_mlu_dtype() ?
+    this->layer_param_.top_mlu_dtype(): bottom[0]->mlu_type();
+  bottom[0]->Reshape(bottom[0]->shape(), cpu_dtype, mlu_dtype, CNML_TENSOR);
   top[0]->Reshape(bottom[0]->shape(), cpu_dtype, mlu_dtype, CNML_TENSOR);
 }
 
@@ -52,16 +55,20 @@ template <typename Dtype>
 void MLUSoftmaxLayer<Dtype>::MLUCreateOpBindData(
      const vector<Blob<Dtype>*>& bottom,
      const vector<Blob<Dtype>*>& top) {
-  cnmlSoftmaxDim_t softmaxDims[4] {cnmlSoftmaxDim_t::CNML_SOFTMAX_DIM_N,
-                                 cnmlSoftmaxDim_t::CNML_SOFTMAX_DIM_C,
-                                 cnmlSoftmaxDim_t::CNML_SOFTMAX_DIM_H,
-                                 cnmlSoftmaxDim_t::CNML_SOFTMAX_DIM_W};
-
-  int axis = this->softmax_axis_;
-  MLU_CHECK(cnmlCreateSoftmaxOp(&softmax_op_ptr_,
-                               softmaxDims[axis],
-                               bottom[0]->mlu_tensor(),
-                               top[0]->mlu_tensor()));
+  int axis;;
+  if (this->softmax_axis_ == 0) {
+    axis = 0;
+  } else if (this->softmax_axis_ == 2) {
+    axis = 1;
+  } else if (this->softmax_axis_ == 3) {
+    axis = 2;
+  } else {
+    axis = 3;
+  }
+  MLU_CHECK(cnmlCreateNdSoftmaxOp(&softmax_op_ptr_,
+                                  axis,
+                                  bottom[0]->mlu_tensor(),
+                                  top[0]->mlu_tensor()));
 }
 
 template<typename Dtype>
@@ -78,18 +85,16 @@ MLUSoftmaxLayer<Dtype>::~MLUSoftmaxLayer() {
 }
 
 template<typename Dtype>
-void MLUSoftmaxLayer<Dtype>::Forward_mlu(
-     const vector<Blob<Dtype>*>& bottom,
-     const vector<Blob<Dtype>*>& top) {
-  bottom[0]->mlu_data();
-  top[0]->mutable_mlu_data();
-  MLU_CHECK(cnmlComputeSoftmaxOpForward_V3(softmax_op_ptr_,
-                                    bottom[0]->mutable_mlu_data(),
-                                    top[0]->mutable_mlu_data(),
-                                    Caffe::forward_param(),
-                                    Caffe::queue()));
+void MLUSoftmaxLayer<Dtype>::Forward_mlu(const vector<Blob<Dtype>*>& bottom,
+                                         const vector<Blob<Dtype>*>& top) {
+  MLU_CHECK(cnmlComputeNdSoftmaxOpForward(softmax_op_ptr_,
+                                          bottom[0]->mutable_mlu_data(),
+                                          top[0]->mutable_mlu_data(),
+                                          Caffe::forward_param(),
+                                          Caffe::queue()));
 }
 
 INSTANTIATE_CLASS(MLUSoftmaxLayer);
+
 }  // namespace caffe
-#endif
+#endif  // USE_MLU
