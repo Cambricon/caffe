@@ -45,7 +45,7 @@ before_script:
 #  - ./scripts/travis/configure.sh
 
 script:
-  - travis_wait 30 ./scripts/travis/build.sh
+  - ./scripts/travis/build.sh
   - ./scripts/travis/test.sh
 
 notifications:
