@@ -23,4 +23,4 @@ sudo -E swapon /opt/images/swap
 echo "After set swap space."
 free -m
 echo "===========build start================"
-sh ./scripts/travis/echo_time.sh & sh ./scripts/build_cambriconcaffe.sh -c
+./scripts/travis/echo_time.sh & ./scripts/build_cambriconcaffe.sh -c
