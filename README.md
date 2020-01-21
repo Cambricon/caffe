@@ -6,7 +6,7 @@
 To support Cambricon deep learning processor, the open source deep learning programming framework [BVLC-Caffe](https://github.com/BVLC/caffe) has been modified. New functions such as off-line multi-core inference, online fusion mode, support of multiple cards and others are developed. Cambricon Caffe focuses on inference, it is dedicated to improving [BVLC-Caffe](https://github.com/BVLC/caffe) performance when running on Machine Learning Unit(MLU).
 
 ## Prerequisites
-Cambricon Caffe has several dependencies as same as [BVLC-Caffe](https://github.com/BVLC/caffe) does, please refer to [caffe.berkeleyvision.org](https://caffe.berkeleyvision.org/installation.html) for details.
+Cambricon Caffe has several dependencies as same as [BVLC-Caffe](https://github.com/BVLC/caffe) does, please refer to [caffe.berkeleyvision.org](https://caffe.berkeleyvision.org/installation.html) for details .
 
 ## Building
 You need to firstly clone [Cambricon Caffe](https://github.com/Cambricon/caffe), and then go to **scripts** folder to compile Cambricon Caffe: 
