@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -493,7 +493,7 @@ TYPED_TEST(MLUInnerProductLayerTest, TestSetUpTransposeTrue) {
   EXPECT_EQ(10, this->blob_top_->channels());
 }
 
-TYPED_TEST(MLUInnerProductLayerTest, TestForward) {
+TYPED_TEST(MLUInnerProductLayerTest, TestForwardInt8) {
   typedef typename TypeParam::Dtype Dtype;
   this->blob_bottom_vec_.push_back(this->blob_bottom_);
   bool IS_VALID_CUDA = false;
@@ -505,10 +505,23 @@ TYPED_TEST(MLUInnerProductLayerTest, TestForward) {
     InnerProductParameter* inner_product_param =
         layer_param.mutable_inner_product_param();
     inner_product_param->set_num_output(10);
-    inner_product_param->mutable_weight_filler()->set_type("uniform");
-    inner_product_param->mutable_bias_filler()->set_type("uniform");
+    inner_product_param->mutable_weight_filler()->set_type("constant");
+    inner_product_param->mutable_weight_filler()->set_value(10);
+    inner_product_param->mutable_bias_filler()->set_type("constant");
+    inner_product_param->mutable_bias_filler()->set_value(1);
     inner_product_param->mutable_bias_filler()->set_min(1);
     inner_product_param->mutable_bias_filler()->set_max(2);
+    BlobDataType blob_dtype;   // set position
+    blob_dtype = get_quantized_info(*this->blob_bottom_,
+                                    layer_param, "common", DT_INT8);
+    layer_param.add_bottom_mlu_dtype()->CopyFrom(blob_dtype);
+    int position = -3;  // set weight position
+    int scale = 1.5875;
+    BlobDataType blobs_dtype;
+    blobs_dtype.set_type(DT_INT8);
+    blobs_dtype.add_position(position);
+    blobs_dtype.add_scale(scale);
+    layer_param.add_blobs_dtype()->CopyFrom(blobs_dtype);
     shared_ptr<MLUInnerProductLayer<Dtype> > layer(
         new MLUInnerProductLayer<Dtype>(layer_param));
     layer->SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
@@ -531,7 +544,7 @@ TYPED_TEST(MLUInnerProductLayerTest, TestForward) {
   }
 }
 
-TYPED_TEST(MLUInnerProductLayerTest, TestForwardNoBatch) {
+TYPED_TEST(MLUInnerProductLayerTest, TestForwardNoBatchInt8) {
   typedef typename TypeParam::Dtype Dtype;
   this->blob_bottom_vec_.push_back(this->blob_bottom_nobatch_);
   bool IS_VALID_CUDA = false;
@@ -543,10 +556,23 @@ TYPED_TEST(MLUInnerProductLayerTest, TestForwardNoBatch) {
     InnerProductParameter* inner_product_param =
         layer_param.mutable_inner_product_param();
     inner_product_param->set_num_output(10);
-    inner_product_param->mutable_weight_filler()->set_type("uniform");
-    inner_product_param->mutable_bias_filler()->set_type("uniform");
+    inner_product_param->mutable_weight_filler()->set_type("constant");
+    inner_product_param->mutable_weight_filler()->set_value(10);
+    inner_product_param->mutable_bias_filler()->set_type("constant");
+    inner_product_param->mutable_bias_filler()->set_value(1);
     inner_product_param->mutable_bias_filler()->set_min(1);
     inner_product_param->mutable_bias_filler()->set_max(2);
+    BlobDataType blob_dtype;  // set position
+    blob_dtype = get_quantized_info(*this->blob_bottom_,
+                                    layer_param, "common", DT_INT8);
+    layer_param.add_bottom_mlu_dtype()->CopyFrom(blob_dtype);
+    int position = -3;  // set weight position
+    int scale = 1.5875;
+    BlobDataType blobs_dtype;
+    blobs_dtype.set_type(DT_INT8);
+    blobs_dtype.add_position(position);
+    blobs_dtype.add_scale(scale);
+    layer_param.add_blobs_dtype()->CopyFrom(blobs_dtype);
     shared_ptr<MLUInnerProductLayer<Dtype> > layer(
         new MLUInnerProductLayer<Dtype>(layer_param));
     layer->SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
@@ -652,7 +678,7 @@ TYPED_TEST(MFUSInnerProductLayerTest, TestSetUpTransposeTrue) {
   EXPECT_EQ(10, this->blob_top_->channels());
 }
 
-TYPED_TEST(MFUSInnerProductLayerTest, TestForward) {
+TYPED_TEST(MFUSInnerProductLayerTest, TestForwardInt8) {
   typedef typename TypeParam::Dtype Dtype;
   this->blob_bottom_vec_.push_back(this->blob_bottom_);
   bool IS_VALID_CUDA = false;
@@ -665,14 +691,26 @@ TYPED_TEST(MFUSInnerProductLayerTest, TestForward) {
     InnerProductParameter* inner_product_param =
         layer_param.mutable_inner_product_param();
     inner_product_param->set_num_output(10);
-    inner_product_param->mutable_weight_filler()->set_type("uniform");
-    inner_product_param->mutable_bias_filler()->set_type("uniform");
+    inner_product_param->mutable_weight_filler()->set_type("constant");
+    inner_product_param->mutable_weight_filler()->set_value(10);
+    inner_product_param->mutable_bias_filler()->set_type("constant");
+    inner_product_param->mutable_bias_filler()->set_value(1);
     inner_product_param->mutable_bias_filler()->set_min(1);
     inner_product_param->mutable_bias_filler()->set_max(2);
+    BlobDataType blob_dtype;  // set position
+    blob_dtype = get_quantized_info(*this->blob_bottom_,
+                                    layer_param, "common", DT_INT8);
+    layer_param.add_bottom_mlu_dtype()->CopyFrom(blob_dtype);
+    int position = -3;  // set weight position
+    int scale = 1.5875;
+    BlobDataType blobs_dtype;
+    blobs_dtype.set_type(DT_INT8);
+    blobs_dtype.add_position(position);
+    blobs_dtype.add_scale(scale);
+    layer_param.add_blobs_dtype()->CopyFrom(blobs_dtype);
     MLUInnerProductLayer<Dtype> layer(layer_param);
     layer.SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
     ASSERT_TRUE(layer.mfus_supported());
-
     MFusion<Dtype> fuser;
     fuser.reset();
     fuser.addInputs(this->blob_bottom_vec_);
@@ -697,7 +735,7 @@ TYPED_TEST(MFUSInnerProductLayerTest, TestForward) {
   }
 }
 
-TYPED_TEST(MFUSInnerProductLayerTest, TestForwardNoBatch) {
+TYPED_TEST(MFUSInnerProductLayerTest, TestForwardNoBatchInt8) {
   typedef typename TypeParam::Dtype Dtype;
   this->blob_bottom_vec_.push_back(this->blob_bottom_nobatch_);
   bool IS_VALID_CUDA = false;
@@ -710,14 +748,26 @@ TYPED_TEST(MFUSInnerProductLayerTest, TestForwardNoBatch) {
     InnerProductParameter* inner_product_param =
         layer_param.mutable_inner_product_param();
     inner_product_param->set_num_output(10);
-    inner_product_param->mutable_weight_filler()->set_type("uniform");
-    inner_product_param->mutable_bias_filler()->set_type("uniform");
+    inner_product_param->mutable_weight_filler()->set_type("constant");
+    inner_product_param->mutable_weight_filler()->set_value(10);
+    inner_product_param->mutable_bias_filler()->set_type("constant");
+    inner_product_param->mutable_bias_filler()->set_value(1);
     inner_product_param->mutable_bias_filler()->set_min(1);
     inner_product_param->mutable_bias_filler()->set_max(2);
+    BlobDataType blob_dtype;  // set position
+    blob_dtype = get_quantized_info(*this->blob_bottom_,
+                                    layer_param, "common", DT_INT8);
+    layer_param.add_bottom_mlu_dtype()->CopyFrom(blob_dtype);
+    int position = -3;  // set weight position
+    int scale = 1.5875;
+    BlobDataType blobs_dtype;
+    blobs_dtype.set_type(DT_INT8);
+    blobs_dtype.add_position(position);
+    blobs_dtype.add_scale(scale);
+    layer_param.add_blobs_dtype()->CopyFrom(blobs_dtype);
     MLUInnerProductLayer<Dtype> layer(layer_param);
     layer.SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
     ASSERT_TRUE(layer.mfus_supported());
-
     MFusion<Dtype> fuser;
     fuser.reset();
     fuser.addInputs(this->blob_bottom_vec_);

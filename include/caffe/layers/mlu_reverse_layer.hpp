@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -41,11 +41,12 @@ namespace caffe {
 template <typename Dtype>
 class MLUReverseLayer : public ReverseLayer<Dtype> {
 /**
- * @brief Reverse Data by C-channel of Bottom
+ * @brief MLU acceleration of ReverseLayer
+ *        ReverseLayer reverses input data by C-channel of Bottom.
  *        Input and Output shapes are same
  *        One Bottom and one Top
  */
- public:
+  public:
   explicit MLUReverseLayer(const LayerParameter& param)
       : ReverseLayer<Dtype>(param), reverse_op_ptr_(nullptr) {}
   virtual void LayerSetUp(const vector<Blob<Dtype>*>& bottom,
@@ -56,7 +57,7 @@ class MLUReverseLayer : public ReverseLayer<Dtype> {
   virtual void fuse(MFusion<Dtype>* fuser);
   virtual ~MLUReverseLayer();
 
- protected:
+  protected:
   virtual void MLUDestroyOp();
   virtual void MLUCreateOpBindData(const vector<Blob<Dtype>*>& bottom,
                                    const vector<Blob<Dtype>*>& top);
@@ -69,7 +70,6 @@ class MLUReverseLayer : public ReverseLayer<Dtype> {
                            const vector<Blob<Dtype>*>& top);
   cnmlBaseOp_t reverse_op_ptr_;
 };
-
 }  // namespace caffe
 #endif  // USE_MLU
 #endif  // INCLUDE_CAFFE_LAYERS_MLU_REVERSE_LAYER_HPP_

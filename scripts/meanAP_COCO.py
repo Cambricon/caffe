@@ -134,6 +134,21 @@ def generate_json_file(file_list, result_dir, clases_list, output_file):
 
     return img_ids, json_file_name
 
+def update_json_meanAp(json_data, meanAp, key):
+    if isinstance(json_data, dict):
+        for k in json_data:
+            if k == key:
+               json_data[k] = meanAp
+            elif isinstance(json_data[k], dict):
+               update_json_meanAp(json_data[k], meanAp, key)
+
+class redirect:
+    content = ""
+    def write(self, str):
+        self.content += str
+    def flush(self):
+        self.content = ""
+
 if __name__ == "__main__":
     args = get_args()
     img_list = args.file_list
@@ -164,3 +179,17 @@ if __name__ == "__main__":
     coco_eval.evaluate()
     coco_eval.accumulate()
     coco_eval.summarize()
+
+    input_json_file = os.getenv('OUTPUT_JSON_FILE','')
+    if os.path.isfile(input_json_file):
+        r = redirect()
+        sys.stdout = r
+        coco_eval.summarize()
+        file_in = open(input_json_file, "r")
+        json_data = json.load(file_in)
+        update_json_meanAp(json_data, r.content, 'meanAp')
+        file_in.close()
+        file_out = open(input_json_file, "w")
+        json.dump(json_data, file_out,indent=2)
+        file_out.close()
+        r.flush()

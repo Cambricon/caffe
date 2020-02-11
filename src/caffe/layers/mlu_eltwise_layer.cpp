@@ -2,7 +2,7 @@
 All modification made by Cambricon Corporation: © 2018--2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -31,7 +31,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <cfloat>
 #include <vector>
-
 #include "caffe/layers/mlu_eltwise_layer.hpp"
 #include "caffe/util/math_functions.hpp"
 
@@ -43,16 +42,21 @@ void MLUEltwiseLayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& bottom,
   EltwiseLayer<Dtype>::LayerSetUp(bottom, top);
   switch (this->op_) {
     case EltwiseParameter_EltwiseOp_SUM:
-      vec_sum_op_ptr_.resize(bottom.size()-1, nullptr);
-      temp_.resize(bottom.size()-2, nullptr);
+      if (alpha_.size() == 0)
+        alpha_.resize(bottom.size(), nullptr);
+      beta_ =  new Blob<Dtype>();
+      vec_scale_op_ptr_.resize(bottom.size(), nullptr);
+      vec_add_op_ptr_.resize(bottom.size()-1, nullptr);
+      temp_.resize(bottom.size(), nullptr);
+      if (bottom.size() > 2)
+        temp2_.resize(bottom.size() - 2, nullptr);
       break;
     case EltwiseParameter_EltwiseOp_PROD:
       vec_mult_op_ptr_.resize(bottom.size()-1, nullptr);
       temp_.resize(bottom.size()-2, nullptr);
       break;
     case EltwiseParameter_EltwiseOp_MAX:
-      vec_max_op_ptr_.resize(bottom.size()-1, nullptr);
-      temp_.resize(bottom.size()-2, nullptr);
+      LOG(FATAL) << "NOT IMPLEMENT";
       break;
     default:
       LOG(FATAL) << "NOT IMPLEMENT";
@@ -63,6 +67,9 @@ void MLUEltwiseLayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& bottom,
   }
   for (int i = 0; i < temp_.size(); i++) {
     temp_[i] = new Blob<Dtype>();
+  }
+  for (int i = 0; i < temp2_.size(); i++) {
+    temp2_[i] = new Blob<Dtype>();
   }
 }
 
@@ -78,31 +85,40 @@ void MLUEltwiseLayer<Dtype>::Reshape_tensor(const vector<Blob<Dtype>*>& bottom,
   }
 
   BaseDataType cpu_dtype = sizeof(Dtype) == 4 ? DT_FLOAT32 : DT_DOUBLE;
-  BaseDataType mlu_dtype = DT_FLOAT16;
+  BaseDataType mlu_dtype = bottom[0]->mlu_type();
   top[0]->Reshape(bottom[0]->shape(), cpu_dtype, mlu_dtype, CNML_TENSOR);
   for (int i = 0; i < temp_.size(); i++) {
-    temp_[i]->Reshape(bottom[0]->shape(), cpu_dtype, mlu_dtype, CNML_TENSOR);
+     temp_[i]->Reshape(bottom[0]->shape(), cpu_dtype, mlu_dtype, CNML_TENSOR);
+  }
+  for (int i = 0; i < temp2_.size(); i++) {
+     temp2_[i]->Reshape(bottom[0]->shape(), cpu_dtype, mlu_dtype, CNML_TENSOR);
   }
 }
 
 template <typename Dtype>
 void MLUEltwiseLayer<Dtype>::MLUDestroyOp() {
-  for (int i = 0; i < vec_max_op_ptr_.size(); i++) {
-    if (vec_max_op_ptr_[i] != nullptr) {
-      cnmlDestroyBaseOp(&vec_max_op_ptr_[i]);
-      vec_max_op_ptr_[i] = nullptr;
-    }
-  }
-  for (int i = 0; i < vec_sum_op_ptr_.size(); i++) {
-    if (vec_sum_op_ptr_[i] != nullptr) {
-      cnmlDestroyBaseOp(&vec_sum_op_ptr_[i]);
-      vec_sum_op_ptr_[i] = nullptr;
-    }
-  }
   for (int i = 0; i < vec_mult_op_ptr_.size(); i++) {
     if (vec_mult_op_ptr_[i] != nullptr) {
       cnmlDestroyBaseOp(&vec_mult_op_ptr_[i]);
       vec_mult_op_ptr_[i] = nullptr;
+    }
+  }
+  for (int i = 0; i < vec_scale_op_ptr_.size(); i++) {
+    if (vec_scale_op_ptr_[i] != nullptr) {
+      cnmlDestroyBaseOp(&vec_scale_op_ptr_[i]);
+      vec_scale_op_ptr_[i] = nullptr;
+    }
+  }
+  for (int i = 0; i < vec_add_op_ptr_.size(); i++) {
+    if (vec_add_op_ptr_[i] != nullptr) {
+      cnmlDestroyBaseOp(&vec_add_op_ptr_[i]);
+      vec_add_op_ptr_[i] = nullptr;
+    }
+  }
+  for (int i = 0; i < vec_max_op_ptr_.size(); i++) {
+    if (vec_max_op_ptr_[i] != nullptr) {
+      cnmlDestroyBaseOp(&vec_max_op_ptr_[i]);
+      vec_max_op_ptr_[i] = nullptr;
     }
   }
 }
@@ -136,57 +152,83 @@ void MLUEltwiseLayer<Dtype>::MLUCreateOpBindData(
                                   top[0]->mlu_tensor()));
       }
       break;
-    case EltwiseParameter_EltwiseOp_SUM:
-       if (bottom.size() == 2) {
-          MLU_CHECK(cnmlCreateCoeffAddOp(&vec_sum_op_ptr_[0],
-                      this->coeffs_[0], this->coeffs_[1],
-                      bottom[0]->mlu_tensor(),
-                      bottom[1]->mlu_tensor(),
-                      top[0]->mlu_tensor()));
-       } else {
-          MLU_CHECK(cnmlCreateCoeffAddOp(&vec_sum_op_ptr_[0],
-                      this->coeffs_[0], this->coeffs_[1],
-                      bottom[0]->mlu_tensor(),
-                      bottom[1]->mlu_tensor(),
-                      temp_[0]->mlu_tensor()));
-          for (int i = 2; i < bottom.size()-1; i++) {
-              MLU_CHECK(cnmlCreateCoeffAddOp(&vec_sum_op_ptr_[i-1],
-                      1., this->coeffs_[i],
-                      temp_[i-2]->mlu_tensor(),
-                      bottom[i]->mlu_tensor(),
-                      temp_[i-1]->mlu_tensor()));
-          }
-          MLU_CHECK(cnmlCreateCoeffAddOp(
-                    &vec_sum_op_ptr_[vec_sum_op_ptr_.size()-1],
-                    1., this->coeffs_[this->coeffs_.size()-1],
-                    temp_[temp_.size()-1]->mlu_tensor(),
-                    bottom[bottom.size()-1]->mlu_tensor(),
-                    top[0]->mlu_tensor()));
-       }
-      break;
-    case EltwiseParameter_EltwiseOp_MAX:
-      if (bottom.size() == 2) {
-        MLU_CHECK(cnmlCreateMaxTTOp(&vec_max_op_ptr_[0],
-                                   bottom[0]->mlu_tensor(),
-                                   bottom[1]->mlu_tensor(),
-                                   top[0]->mlu_tensor()));
-      } else {
-        MLU_CHECK(cnmlCreateMaxTTOp(&vec_max_op_ptr_[0],
-                                   bottom[0]->mlu_tensor(),
-                                   bottom[1]->mlu_tensor(),
-                                   temp_[0]->mlu_tensor()));
-        for (int i = 2; i < bottom.size()-1; i++) {
-          MLU_CHECK(cnmlCreateMaxTTOp(&vec_max_op_ptr_[i-1],
-                                     bottom[i]->mlu_tensor(),
-                                     temp_[i-2]->mlu_tensor(),
-                                     temp_[i-1]->mlu_tensor()));
-        }
-
-        MLU_CHECK(cnmlCreateMaxTTOp(&vec_max_op_ptr_[vec_max_op_ptr_.size()-1],
-                                   temp_[temp_.size()-1]->mlu_tensor(),
-                                   bottom[bottom.size()-1]->mlu_tensor(),
-                                   top[0]->mlu_tensor()));
+    case EltwiseParameter_EltwiseOp_SUM: {
+      // reshape alpha and beta
+      BaseDataType cpu_dtype = sizeof(Dtype) == 4 ? DT_FLOAT32 : DT_DOUBLE;
+      vector<int> param_shape(bottom[0]->num_axes(), 1);
+      param_shape[0] = 1;
+      param_shape[1] = bottom[0]->channels();
+      for (int i = 0; i < alpha_.size(); i++) {
+          alpha_[i]->Reshape(param_shape, cpu_dtype, DT_FLOAT16, CNML_CONST);
+          for (int j = 0; j < alpha_[i]->count(); j++)
+              alpha_[i]->mutable_cpu_data()[j] = this->coeffs_[i];
       }
+      beta_->Reshape(param_shape, cpu_dtype, DT_FLOAT16, CNML_CONST);
+      for (int j = 0; j < beta_->count(); j++)
+          beta_->mutable_cpu_data()[j] = 0;
+      if (bottom.size() == 1) {
+        MLU_CHECK(cnmlCreateNdScaleOp(&vec_scale_op_ptr_[0],
+                                      bottom[0]->num_axes() - 1,
+                                      bottom[0]->mlu_tensor(),
+                                      top[0]->mlu_tensor(),
+                                      alpha_[0]->mlu_tensor(),
+                                      beta_->mlu_tensor()));
+        MLU_CHECK(cnmlBindConstData_V2(alpha_[0]->mlu_tensor(),
+                                       alpha_[0]->sync_data(),
+                                       false));
+        MLU_CHECK(cnmlBindConstData_V2(beta_->mlu_tensor(),
+                                       beta_->sync_data(),
+                                       false));
+      } else {
+        for (int i = 0; i < bottom.size(); i++) {
+          if (this->coeffs_[i] != 1) {
+              MLU_CHECK(cnmlCreateNdScaleOp(&vec_scale_op_ptr_[i],
+                                            bottom[0]->num_axes() - 1,
+                                            bottom[i]->mlu_tensor(),
+                                            temp_[i]->mlu_tensor(),
+                                            alpha_[i]->mlu_tensor(),
+                                            beta_->mlu_tensor()));
+              MLU_CHECK(cnmlBindConstData_V2(alpha_[i]->mlu_tensor(),
+                                             alpha_[i]->sync_data(),
+                                             false));
+              MLU_CHECK(cnmlBindConstData_V2(beta_->mlu_tensor(),
+                                              beta_->sync_data(),
+                                              false));
+          }
+        }
+        if (bottom.size() == 2) {
+            MLU_CHECK(cnmlCreateAddOp(&vec_add_op_ptr_[0],
+                        this->coeffs_[0] != 1 ? temp_[0]->mlu_tensor()
+                        : bottom[0]->mlu_tensor(),
+                        this->coeffs_[1] != 1 ? temp_[1]->mlu_tensor()
+                        : bottom[1]->mlu_tensor(),
+                        top[0]->mlu_tensor()));
+        } else {
+            MLU_CHECK(cnmlCreateAddOp(&vec_add_op_ptr_[0],
+                        this->coeffs_[0] != 1 ? temp_[0]->mlu_tensor()
+                        : bottom[0]->mlu_tensor(),
+                        this->coeffs_[1] != 1 ? temp_[1]->mlu_tensor()
+                        : bottom[1]->mlu_tensor(),
+                        temp2_[0]->mlu_tensor()));
+            for (int i = 2; i < bottom.size()-1; i++) {
+                MLU_CHECK(cnmlCreateAddOp(&vec_add_op_ptr_[i-1],
+                        this->coeffs_[i] != 1 ? temp_[i]->mlu_tensor()
+                        : bottom[i]->mlu_tensor(),
+                        temp2_[i-2]->mlu_tensor(),
+                        temp2_[i-1]->mlu_tensor()));
+            }
+            MLU_CHECK(cnmlCreateAddOp(&vec_add_op_ptr_[bottom.size()-2],
+                        this->coeffs_[bottom.size()-1] != 1
+                        ? temp_[bottom.size()-1]->mlu_tensor()
+                        : bottom[bottom.size()-1]->mlu_tensor(),
+                        temp2_[temp2_.size()-1]->mlu_tensor(),
+                        top[0]->mlu_tensor()));
+        }
+      }
+      break;
+  }
+    case EltwiseParameter_EltwiseOp_MAX:
+      LOG(FATAL) << "NOT IMPLEMENT";
       break;
   }
 }
@@ -198,22 +240,24 @@ void MLUEltwiseLayer<Dtype>::MLUCompileOp() {
       for (int i = 0; i < vec_mult_op_ptr_.size(); i++) {
         MLU_CHECK(cnmlCompileBaseOp(vec_mult_op_ptr_[i],
                                     Caffe::rt_core(),
-                                    Caffe::model_parallel()));
+                                    Caffe::core_number()));
       }
       break;
     case EltwiseParameter_EltwiseOp_SUM:
-      for (int i = 0; i < vec_sum_op_ptr_.size(); i++) {
-        MLU_CHECK(cnmlCompileBaseOp(vec_sum_op_ptr_[i],
-                                    Caffe::rt_core(),
-                                    Caffe::model_parallel()));
+      for (int i = 0; i < vec_scale_op_ptr_.size(); i++) {
+          if (this->coeffs_[i] != 1)
+              MLU_CHECK(cnmlCompileBaseOp(vec_scale_op_ptr_[i],
+                                          Caffe::rt_core(),
+                                          Caffe::core_number()));
+      }
+      for (int i = 0; i < vec_add_op_ptr_.size(); i++) {
+          MLU_CHECK(cnmlCompileBaseOp(vec_add_op_ptr_[i],
+                                      Caffe::rt_core(),
+                                      Caffe::core_number()));
       }
       break;
     case EltwiseParameter_EltwiseOp_MAX:
-      for (int i = 0; i < vec_max_op_ptr_.size(); i++) {
-        MLU_CHECK(cnmlCompileBaseOp(vec_max_op_ptr_[i],
-                                    Caffe::rt_core(),
-                                    Caffe::model_parallel()));
-      }
+      LOG(FATAL) << "NOT IMPLEMENT";
       break;
   }
 }
@@ -227,14 +271,16 @@ void MLUEltwiseLayer<Dtype>::fuse(MFusion<Dtype>* fuser) {
       }
       break;
     case EltwiseParameter_EltwiseOp_SUM:
-      for (int i = 0; i < vec_sum_op_ptr_.size(); i++) {
-        fuser->fuse(vec_sum_op_ptr_[i]);
+      for (int i = 0; i < vec_scale_op_ptr_.size(); i++) {
+          if (this->coeffs_[i] != 1)
+              fuser->fuse(vec_scale_op_ptr_[i]);
+      }
+      for (int i = 0; i < vec_add_op_ptr_.size(); i++) {
+          fuser->fuse(vec_add_op_ptr_[i]);
       }
       break;
     case EltwiseParameter_EltwiseOp_MAX:
-      for (int i = 0; i < vec_max_op_ptr_.size(); i++) {
-        fuser->fuse(vec_max_op_ptr_[i]);
-      }
+      LOG(FATAL) << "NOT IMPLEMENT";
       break;
   }
 }
@@ -242,8 +288,22 @@ void MLUEltwiseLayer<Dtype>::fuse(MFusion<Dtype>* fuser) {
 template <typename Dtype>
 MLUEltwiseLayer<Dtype>::~MLUEltwiseLayer() {
   MLUDestroyOp();
-  for (int i = 0; i < alpha_.size(); i++) { delete alpha_[i]; }
-  for (int i = 0; i < temp_.size(); i++)  { delete temp_[i]; }
+  for (int i = 0; i < alpha_.size(); i++) {
+    delete alpha_[i];
+    alpha_[i] = nullptr;
+  }
+  for (int i = 0; i < temp_.size(); i++)  {
+    delete temp_[i];
+    temp_[i] = nullptr;
+  }
+  for (int i = 0; i < temp2_.size(); i++) {
+    delete temp2_[i];
+    temp2_[i] = nullptr;
+  }
+  if (beta_) {
+    delete beta_;
+    beta_ = nullptr;
+  }
 }
 
 template <typename Dtype>
@@ -253,25 +313,25 @@ void MLUEltwiseLayer<Dtype>::Forward_mlu(
     case EltwiseParameter_EltwiseOp_PROD:
       if (bottom.size() == 2) {
         MLU_CHECK(cnmlComputeMultOpForward_V3(vec_mult_op_ptr_[0],
-                                 bottom[0]->mutable_mlu_data(),
-                                 bottom[1]->mutable_mlu_data(),
-                                 top[0]->mutable_mlu_data(),
-                                 Caffe::forward_param(),
-                                 Caffe::queue()));
+                                              bottom[0]->mutable_mlu_data(),
+                                              bottom[1]->mutable_mlu_data(),
+                                              top[0]->mutable_mlu_data(),
+                                              Caffe::forward_param(),
+                                              Caffe::queue()));
       } else {
         MLU_CHECK(cnmlComputeMultOpForward_V3(vec_mult_op_ptr_[0],
-                                 bottom[0]->mutable_mlu_data(),
-                                 bottom[1]->mutable_mlu_data(),
-                                 temp_[0]->mutable_mlu_data(),
-                                 Caffe::forward_param(),
-                                 Caffe::queue()));
+                                              bottom[0]->mutable_mlu_data(),
+                                              bottom[1]->mutable_mlu_data(),
+                                              temp_[0]->mutable_mlu_data(),
+                                              Caffe::forward_param(),
+                                              Caffe::queue()));
         for (size_t i = 2; i < bottom.size()-1; i++) {
           MLU_CHECK(cnmlComputeMultOpForward_V3(vec_mult_op_ptr_[i-1],
-                                   bottom[i]->mutable_mlu_data(),
-                                   temp_[i-2]->mutable_mlu_data(),
-                                   temp_[i-1]->mutable_mlu_data(),
-                                   Caffe::forward_param(),
-                                   Caffe::queue()));
+                                                bottom[i]->mutable_mlu_data(),
+                                                temp_[i-2]->mutable_mlu_data(),
+                                                temp_[i-1]->mutable_mlu_data(),
+                                                Caffe::forward_param(),
+                                                Caffe::queue()));
         }
         MLU_CHECK(cnmlComputeMultOpForward_V3(
                                  vec_mult_op_ptr_[vec_mult_op_ptr_.size()-1],
@@ -283,65 +343,66 @@ void MLUEltwiseLayer<Dtype>::Forward_mlu(
       }
       break;
     case EltwiseParameter_EltwiseOp_SUM:
-      if (bottom.size() == 2) {
-         MLU_CHECK(cnmlComputeCoeffAddOpForward_V3(vec_sum_op_ptr_[0],
-                                bottom[0]->mutable_mlu_data(),
-                                bottom[1]->mutable_mlu_data(),
-                                top[0]->mutable_mlu_data(),
-                                Caffe::forward_param(), Caffe::queue()));
+      if (bottom.size() == 1) {
+        MLU_CHECK(cnmlComputeNdScaleOpForward(vec_scale_op_ptr_[0],
+                                              NULL,
+                                              bottom[0]->mutable_mlu_data(),
+                                              NULL,
+                                              top[0]->mutable_mlu_data(),
+                                              Caffe::queue(),
+                                              NULL));
       } else {
-        MLU_CHECK(cnmlComputeCoeffAddOpForward_V3(vec_sum_op_ptr_[0],
-                                bottom[0]->mutable_mlu_data(),
-                                bottom[1]->mutable_mlu_data(),
-                                temp_[0]->mutable_mlu_data(),
-                                Caffe::forward_param(), Caffe::queue()));
-        for (int i = 2; i < bottom.size()-1; i++) {
-            MLU_CHECK(cnmlComputeCoeffAddOpForward_V3(vec_sum_op_ptr_[i-1],
-                                temp_[i-2]->mutable_mlu_data(),
-                                bottom[i]->mutable_mlu_data(),
-                                temp_[i-1]->mutable_mlu_data(),
-                                Caffe::forward_param(), Caffe::queue()));
+        for (int i = 0; i < bottom.size(); i++) {
+            if (this->coeffs_[i] != 1)
+                MLU_CHECK(cnmlComputeNdScaleOpForward(vec_scale_op_ptr_[i],
+                            NULL,
+                            bottom[i]->mutable_mlu_data(),
+                            NULL,
+                            temp_[i]->mutable_mlu_data(),
+                            Caffe::queue(),
+                            NULL));
         }
-        MLU_CHECK(cnmlComputeCoeffAddOpForward_V3(
-                                vec_sum_op_ptr_[vec_sum_op_ptr_.size()-1],
-                                temp_[temp_.size()-1]->mutable_mlu_data(),
-                                bottom[bottom.size()-1]->mutable_mlu_data(),
-                                top[0]->mutable_mlu_data(),
-                                Caffe::forward_param(),
-                                Caffe::queue()));
+        if (bottom.size() == 2) {
+            MLU_CHECK(cnmlComputeAddOpForward_V3(vec_add_op_ptr_[0],
+                this->coeffs_[0] != 1 ? temp_[0]->mutable_mlu_data() :
+                bottom[0]->mutable_mlu_data(),
+                this->coeffs_[1] != 1 ? temp_[1]->mutable_mlu_data() :
+                bottom[1]->mutable_mlu_data(),
+                top[0]->mutable_mlu_data(),
+                Caffe::forward_param(),
+                Caffe::queue()));
+        } else {
+            MLU_CHECK(cnmlComputeAddOpForward_V3(vec_add_op_ptr_[0],
+                this->coeffs_[0] != 1 ? temp_[0]->mutable_mlu_data() :
+                bottom[0]->mutable_mlu_data(),
+                this->coeffs_[1] != 1 ? temp_[1]->mutable_mlu_data() :
+                bottom[1]->mutable_mlu_data(),
+                temp2_[0]->mutable_mlu_data(),
+                Caffe::forward_param(),
+                Caffe::queue()));
+            for (int i = 2; i < bottom.size()-1; i++) {
+                MLU_CHECK(cnmlComputeAddOpForward_V3(vec_add_op_ptr_[i-1],
+                            this->coeffs_[i] != 1 ?
+                            temp_[i]->mutable_mlu_data() :
+                            bottom[i]->mutable_mlu_data(),
+                            temp2_[i-2]->mutable_mlu_data(),
+                            temp2_[i-1]->mutable_mlu_data(),
+                            Caffe::forward_param(),
+                            Caffe::queue()));
+            }
+            MLU_CHECK(cnmlComputeAddOpForward_V3(vec_add_op_ptr_[bottom.size()-2],
+                        this->coeffs_[bottom.size()-1] != 1 ?
+                        temp_[bottom.size()-1]->mutable_mlu_data() :
+                        bottom[bottom.size()-1]->mutable_mlu_data(),
+                        temp2_[temp2_.size()-1]->mutable_mlu_data(),
+                        top[0]->mutable_mlu_data(),
+                        Caffe::forward_param(),
+                        Caffe::queue()));
+        }
       }
-    break;
+      break;
     case EltwiseParameter_EltwiseOp_MAX:
-      if (bottom.size() == 2) {
-        MLU_CHECK(cnmlComputeMaxTTOpForward_V3(vec_max_op_ptr_[0],
-                                 bottom[0]->mutable_mlu_data(),
-                                 bottom[1]->mutable_mlu_data(),
-                                 top[0]->mutable_mlu_data(),
-                                 Caffe::forward_param(),
-                                 Caffe::queue()));
-      } else {
-        MLU_CHECK(cnmlComputeMaxTTOpForward_V3(vec_max_op_ptr_[0],
-                                 bottom[0]->mutable_mlu_data(),
-                                 bottom[1]->mutable_mlu_data(),
-                                 temp_[0]->mutable_mlu_data(),
-                                 Caffe::forward_param(),
-                                 Caffe::queue()));
-        for (int i = 2; i < bottom.size()-1; i++) {
-          MLU_CHECK(cnmlComputeMaxTTOpForward_V3(vec_max_op_ptr_[i-1],
-                                   bottom[i]->mutable_mlu_data(),
-                                   temp_[i-2]->mutable_mlu_data(),
-                                   temp_[i-1]->mutable_mlu_data(),
-                                   Caffe::forward_param(),
-                                   Caffe::queue()));
-        }
-        MLU_CHECK(cnmlComputeMaxTTOpForward_V3(
-                                 vec_max_op_ptr_[vec_max_op_ptr_.size()-1],
-                                 temp_[temp_.size()-1]->mutable_mlu_data(),
-                                 bottom[bottom.size()-1]->mutable_mlu_data(),
-                                 top[0]->mutable_mlu_data(),
-                                 Caffe::forward_param(),
-                                 Caffe::queue()));
-      }
+      LOG(FATAL) << "NOT IMPLEMENT";
       break;
   }  // switch
 }

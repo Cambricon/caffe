@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -238,16 +238,21 @@ class MLUPowerLayerTest : public MLUDeviceTest<TypeParam> {
     const Dtype* bottom_data = this->blob_bottom_->cpu_data();
     const Dtype* top_data = this->blob_top_->cpu_data();
     for (int i = 0; i < this->blob_bottom_->count(); ++i) {
-      Dtype expected_value = pow(shift + scale * bottom_data[i], power);
+    // Dtype expected_value = pow(shift + scale * bottom_data[i], power);
+      float sign = 1;
+      float old_flag = power - 2*floor(power / 2);
+      sign = ((shift + scale * bottom_data[i]) < 0?-1:1);
+      Dtype expected_value = powf(fabs(shift + scale * bottom_data[i]), power);
+      if (old_flag != 0) {
+         expected_value = expected_value * sign;
+      }
       if (power == Dtype(0) || power == Dtype(1) || power == Dtype(2)) {
         EXPECT_FALSE(isnan(top_data[i]));
       }
-      if (isnan(expected_value)) {
-        EXPECT_LT(std::abs(top_data[i]), 2e-1);
-      } else {
-        Dtype err = std::abs((expected_value - top_data[i]) / expected_value);
-        EXPECT_LT(err, 5e-2);
-        ERR_RATE(err);
+      Dtype err = std::abs((expected_value - top_data[i]) / expected_value);
+      if (sign != -1) {
+          EXPECT_LT(err, 5e-2);
+          ERR_RATE(err);
       }
     }
     std::ostringstream stream, param;
@@ -358,16 +363,21 @@ class MFUSPowerLayerTest : public MFUSDeviceTest<TypeParam> {
     const Dtype* top_data = this->blob_top_->cpu_data();
     const Dtype min_precision = 1e-5;
     for (int i = 0; i < this->blob_bottom_->count(); ++i) {
-      Dtype expected_value = pow(shift + scale * bottom_data[i], power);
+    // Dtype expected_value = pow(shift + scale * bottom_data[i], power);
+      float sign = 1;
+      float old_flag = power - 2*floor(power / 2);
+      sign = ((shift + scale * bottom_data[i]) < 0?-1:1);
+      Dtype expected_value = powf(fabs(shift + scale * bottom_data[i]), power);
+      if (old_flag != 0) {
+         expected_value = expected_value * sign;
+      }
       if (power == Dtype(0) || power == Dtype(1) || power == Dtype(2)) {
         EXPECT_FALSE(isnan(top_data[i]));
       }
-      if (isnan(expected_value)) {
-        EXPECT_LT(std::abs(top_data[i]), 2e-1);
-      } else {
-        Dtype err = std::abs((expected_value - top_data[i]) / expected_value);
-        EXPECT_LT(err, 5e-2);
-        ERR_RATE(err);
+      Dtype err = std::abs((expected_value - top_data[i]) / expected_value);
+      if (sign != -1) {
+          EXPECT_LT(err, 5e-2);
+          ERR_RATE(err);
       }
     }
     std::ostringstream stream, param;

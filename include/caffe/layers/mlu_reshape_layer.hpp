@@ -2,7 +2,7 @@
 All modification made by Cambricon Corporation: © 2018--2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -29,33 +29,43 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #ifndef INCLUDE_CAFFE_LAYERS_MLU_RESHAPE_LAYER_HPP_
 #define INCLUDE_CAFFE_LAYERS_MLU_RESHAPE_LAYER_HPP_
-
 #ifdef USE_MLU
 
 #include <vector>
-
 #include "caffe/blob.hpp"
 #include "caffe/layer.hpp"
 #include "caffe/proto/caffe.pb.h"
-
 #include "caffe/layers/reshape_layer.hpp"
 
 namespace caffe {
 
+/**
+ * @brief MLU acceleration of ReshapeLayer
+ *        ReshapeLayer Takes a Blob and change its dimensions into specified
+ *  dimensions,but the content of input blob remain the same.
+ */
 template <typename Dtype>
 class MLUReshapeLayer : public ReshapeLayer<Dtype> {
   public:
   explicit MLUReshapeLayer(const LayerParameter& param)
       : ReshapeLayer<Dtype>(param),
         reshape_op_ptr_(nullptr),
-        reshape_param_(nullptr) {}
+        reshape_param_(nullptr),
+        transpose_d2h_param_ptr_(nullptr),
+        transpose_d2h_op_ptr_(nullptr),
+        transpose_h2d_param_ptr_(nullptr),
+        transpose_h2d_op_ptr_(nullptr) {}
 
   virtual void LayerSetUp(const vector<Blob<Dtype>*>& bottom,
                           const vector<Blob<Dtype>*>& top);
   virtual void Reshape_tensor(const vector<Blob<Dtype>*>& bottom,
                               const vector<Blob<Dtype>*>& top);
   virtual inline bool mfus_supported() { return true; }
-  virtual void fuse(MFusion<Dtype>* fuser) { fuser->fuse(reshape_op_ptr_); }
+  virtual void fuse(MFusion<Dtype>* fuser) {
+    fuser->fuse(transpose_d2h_op_ptr_);
+    fuser->fuse(reshape_op_ptr_);
+    fuser->fuse(transpose_h2d_op_ptr_);
+  }
   virtual ~MLUReshapeLayer();
 
   protected:
@@ -68,8 +78,13 @@ class MLUReshapeLayer : public ReshapeLayer<Dtype> {
   cnmlBaseOp_t reshape_op_ptr_;
   cnmlReshapeOpParam_t reshape_param_;
   int output_shape_[4];
+  cnmlNdTransposeOpParam_t transpose_d2h_param_ptr_;
+  cnmlBaseOp_t transpose_d2h_op_ptr_;
+  Blob<Dtype> transpose_d2h_blob_;
+  cnmlNdTransposeOpParam_t transpose_h2d_param_ptr_;
+  cnmlBaseOp_t transpose_h2d_op_ptr_;
+  Blob<Dtype> transpose_h2d_blob_;
 };
 }  // namespace caffe
-
 #endif  // USE_MLU
 #endif  // INCLUDE_CAFFE_LAYERS_MLU_RESHAPE_LAYER_HPP_

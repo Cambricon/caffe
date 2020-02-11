@@ -2,7 +2,7 @@
 All modification made by Cambricon Corporation: © 2018--2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -45,7 +45,7 @@ void MLUArgMaxLayer<Dtype>::Reshape_tensor(const vector<Blob<Dtype>*>& bottom,
                                            const vector<Blob<Dtype>*>& top) {
   ArgMaxLayer<Dtype>::Reshape(bottom, top);
   BaseDataType cpu_dtype = sizeof(Dtype) == 4 ? DT_FLOAT32 : DT_DOUBLE;
-  BaseDataType mlu_dtype = DT_FLOAT16;
+  BaseDataType mlu_dtype = bottom[0]->mlu_type();
   if (this->out_max_val_) {
     top[0]->Reshape(top[0]->shape(),
                     cpu_dtype,
@@ -83,6 +83,11 @@ void MLUArgMaxLayer<Dtype>::Reshape_tensor(const vector<Blob<Dtype>*>& bottom,
     value_blob_ = new Blob<Dtype>(shape, cpu_dtype, mlu_dtype, CNML_TENSOR);
     index_blob_ = new Blob<Dtype>(shape, cpu_dtype, DT_INT16, CNML_TENSOR);
     shape = top[0]->shape();
+    d2h_blob_.Reshape(bottom[0]->shape(),
+                    cpu_dtype, mlu_dtype, CNML_TENSOR, CNML_NHWC);
+    h2d_blob_.Reshape(bottom_reshape_blob_->shape(),
+                      cpu_dtype, mlu_dtype, CNML_TENSOR, CNML_NHWC);
+
     if (this->out_max_val_) {
       shape[1] /= 2;
     }
@@ -111,10 +116,6 @@ void MLUArgMaxLayer<Dtype>::MLUDestroyOp() {
     MLU_CHECK(cnmlDestroyReshapeOpParam(&bottom_reshape_param_ptr_));
     bottom_reshape_param_ptr_ = nullptr;
   }
-  if (concat_param_ptr_ != nullptr) {
-    MLU_CHECK(cnmlDestroyConcatOpParam(&concat_param_ptr_));
-    concat_param_ptr_ = nullptr;
-  }
 
 // Delete Op
   if (topk_op_ptr_ != nullptr) {
@@ -133,6 +134,22 @@ void MLUArgMaxLayer<Dtype>::MLUDestroyOp() {
     MLU_CHECK(cnmlDestroyBaseOp(&cast_op_ptr_));
     cast_op_ptr_ = nullptr;
   }
+  if (trans_d2h_layout_ != nullptr) {
+    MLU_CHECK(cnmlDestroyBaseOp(&trans_d2h_layout_));
+    trans_d2h_layout_ = nullptr;
+  }
+  if (trans_d2h_param_ != nullptr) {
+    MLU_CHECK(cnmlDestroyNdTransposeOpParam(&trans_d2h_param_));
+    trans_d2h_param_ = nullptr;
+  }
+  if (trans_h2d_layout_ != nullptr) {
+    MLU_CHECK(cnmlDestroyBaseOp(&trans_h2d_layout_));
+    trans_h2d_layout_ = nullptr;
+  }
+  if (trans_h2d_param_ != nullptr) {
+    MLU_CHECK(cnmlDestroyNdTransposeOpParam(&trans_h2d_param_));
+    trans_h2d_param_ = nullptr;
+  }
 }
 
 template <typename Dtype>
@@ -150,7 +167,14 @@ void MLUArgMaxLayer<Dtype>::MLUCreateOpBindData(
     } else {
       ch = cnmlDimension_t::CNML_DIM_C;
     }
+    BaseDataType cpu_dtype = sizeof(Dtype) == 4 ? DT_FLOAT32 : DT_DOUBLE;
     if (this->out_max_val_) {
+      if (ch == cnmlDimension_t::CNML_DIM_C) {
+      index_blob_->Reshape(top[0]->shape(),
+                                      cpu_dtype,
+                                      DT_INT32,
+                                      CNML_TENSOR);
+      }
       MLU_CHECK(cnmlCreateTopkOp(&topk_op_ptr_,
                                  this->top_k_,
                                  bottom[0]->mlu_tensor(),
@@ -158,6 +182,12 @@ void MLUArgMaxLayer<Dtype>::MLUCreateOpBindData(
                                  index_blob_->mlu_tensor(),
                                  ch));
     } else {
+      if (ch == cnmlDimension_t::CNML_DIM_C) {
+      top[0]->Reshape(top[0]->shape(),
+                                      cpu_dtype,
+                                      DT_INT32,
+                                      CNML_TENSOR);
+      }
       MLU_CHECK(cnmlCreateTopkOp(&topk_op_ptr_,
                                  this->top_k_,
                                  bottom[0]->mlu_tensor(),
@@ -166,16 +196,49 @@ void MLUArgMaxLayer<Dtype>::MLUCreateOpBindData(
                                  ch));
     }
   } else {
-    MLU_CHECK(cnmlCreateReshapeOpParam(&bottom_reshape_param_ptr_,
-                                       bottom_reshape_blob_->num(),
-                                       bottom_reshape_blob_->channels(),
-                                       bottom_reshape_blob_->height(),
-                                       bottom_reshape_blob_->width(),
-                                       CNML_NCHW));
+    int length = bottom_reshape_blob_->shape().size();
+    vector<int> dim(length, 1);
+    for (int i = 0; i < length; i++) {
+      dim[i] = bottom_reshape_blob_->shape(i);
+    }
+    // div1_blob_ n,h,w,c to n,c,h,w
+    int input_len = bottom[0]->mlu_shape().size();
+    vector<int> dim_order(input_len, 1);
+    dim_order[0] = 0;
+    dim_order[1] = input_len - 1;
+    for (int i = 2; i < input_len; i++) {
+            dim_order[i] = i-1;
+    }
+    MLU_CHECK(cnmlCreateNdTransposeOpParam(&trans_d2h_param_,
+              dim_order.data(), input_len));
+
+    MLU_CHECK(cnmlCreateNdTransposeProOp(&trans_d2h_layout_,
+              bottom[0]->mlu_tensor(),
+              d2h_blob_.mlu_tensor(),
+              trans_d2h_param_));
+
+    MLU_CHECK(cnmlCreateNdReshapeOpParam(&bottom_reshape_param_ptr_,
+                                       dim.data(),
+                                       length));
     MLU_CHECK(cnmlCreateReshapeOp(&bottom_reshape_op_ptr_,
                                   bottom_reshape_param_ptr_,
-                                  bottom[0]->mlu_tensor(),
-                                  bottom_reshape_blob_->mlu_tensor()));
+                                  d2h_blob_.mlu_tensor(),
+                                  h2d_blob_.mlu_tensor()));
+    input_len = h2d_blob_.mlu_shape().size();
+    vector<int> dim_order_last(input_len, 1);
+    dim_order_last[0] = 0;
+    dim_order_last[input_len] = 1;
+    for (int i = 1; i < input_len - 1; i++) {
+            dim_order_last[i] = i + 1;
+    }
+    MLU_CHECK(cnmlCreateNdTransposeOpParam(&trans_h2d_param_,
+                            dim_order_last.data(), input_len));
+
+    MLU_CHECK(cnmlCreateNdTransposeProOp(&trans_h2d_layout_,
+                            h2d_blob_.mlu_tensor(),
+                            bottom_reshape_blob_->mlu_tensor(),
+                            trans_h2d_param_));
+
     if (this->out_max_val_) {
       MLU_CHECK(cnmlCreateTopkOp(&topk_op_ptr_,
                                  this->top_k_,
@@ -193,11 +256,8 @@ void MLUArgMaxLayer<Dtype>::MLUCreateOpBindData(
       input_concat[1] = value_blob_->mlu_tensor();
       cnmlTensor_t output[1];
       output[0] = top[0]->mlu_tensor();
-      MLU_CHECK(cnmlCreateConcatOpParam(&concat_param_ptr_,
-                                        2, 1,
-                                        cnmlConcatMode_t::CNML_CONCAT_FEAT));
-      MLU_CHECK(cnmlCreateConcatOp(&concat_op_ptr_,
-                                   concat_param_ptr_,
+      MLU_CHECK(cnmlCreateNdConcatOp(&concat_op_ptr_,
+                                   3,
                                    input_concat,
                                    2,
                                    output,
@@ -235,10 +295,21 @@ void MLUArgMaxLayer<Dtype>::Forward_mlu(const vector<Blob<Dtype>*>& bottom,
   } else {
     // reshape to (n, c), then topk
     // concat if out_max_val_
+     MLU_CHECK(cnmlComputeTransposeProOpForward_V3(trans_d2h_layout_,
+                                                bottom[0]->mutable_mlu_data(),
+                                                d2h_blob_.mutable_mlu_data(),
+                                                Caffe::forward_param(),
+                                                Caffe::queue()));
     MLU_CHECK(cnmlComputeReshapeOpForward_V3(bottom_reshape_op_ptr_,
-                                      bottom[0]->mutable_mlu_data(),
-                                      bottom_reshape_blob_->mutable_mlu_data(),
+                                      d2h_blob_.mutable_mlu_data(),
+                                      h2d_blob_.mutable_mlu_data(),
                                       Caffe::forward_param(), Caffe::queue()));
+    MLU_CHECK(cnmlComputeTransposeProOpForward_V3(trans_h2d_layout_,
+                                      h2d_blob_.mutable_mlu_data(),
+                                      bottom_reshape_blob_->mutable_mlu_data(),
+                                      Caffe::forward_param(),
+                                      Caffe::queue()));
+
     if (this->out_max_val_) {
       MLU_CHECK(cnmlComputeTopkOpForward_V3(topk_op_ptr_,
           bottom_reshape_blob_->mutable_mlu_data(),
@@ -275,7 +346,9 @@ void MLUArgMaxLayer<Dtype>::fuse(MFusion<Dtype>* fuser) {
   if (this->has_axis_) {
     fuser->fuse(topk_op_ptr_);
   } else {
+    fuser->fuse(trans_d2h_layout_);
     fuser->fuse(bottom_reshape_op_ptr_);
+    fuser->fuse(trans_h2d_layout_);
     if (this->out_max_val_) {
       fuser->fuse(topk_op_ptr_);
       fuser->fuse(cast_op_ptr_);
@@ -291,29 +364,37 @@ void MLUArgMaxLayer<Dtype>::MLUCompileOp() {
   if (this->has_axis_) {
     MLU_CHECK(cnmlCompileBaseOp(topk_op_ptr_,
                                 Caffe::rt_core(),
-                                Caffe::model_parallel()));
+                                Caffe::core_number()));
   } else {
+    MLU_CHECK(cnmlCompileBaseOp(trans_d2h_layout_,
+                                Caffe::rt_core(),
+                                Caffe::core_number()));
     MLU_CHECK(cnmlCompileBaseOp(bottom_reshape_op_ptr_,
                                 Caffe::rt_core(),
-                                Caffe::model_parallel()));
+                                Caffe::core_number()));
+    MLU_CHECK(cnmlCompileBaseOp(trans_h2d_layout_,
+                                Caffe::rt_core(),
+                                Caffe::core_number()));
+
     if (this->out_max_val_) {
       MLU_CHECK(cnmlCompileBaseOp(topk_op_ptr_,
                                   Caffe::rt_core(),
-                                  Caffe::model_parallel()));
+                                  Caffe::core_number()));
       MLU_CHECK(cnmlCompileBaseOp(cast_op_ptr_,
                                   Caffe::rt_core(),
-                                  Caffe::model_parallel()));
+                                  Caffe::core_number()));
       MLU_CHECK(cnmlCompileBaseOp(concat_op_ptr_,
                                   Caffe::rt_core(),
-                                  Caffe::model_parallel()));
+                                  Caffe::core_number()));
     } else {
       MLU_CHECK(cnmlCompileBaseOp(topk_op_ptr_,
                                   Caffe::rt_core(),
-                                  Caffe::model_parallel()));
+                                  Caffe::core_number()));
     }
   }
 }
 
 INSTANTIATE_CLASS(MLUArgMaxLayer);
+
 }   //  namespace caffe
 #endif

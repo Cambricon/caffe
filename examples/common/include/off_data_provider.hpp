@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -52,9 +52,26 @@ class OffDataProvider: public DataProvider<Dtype, Qtype>{
                         const queue<string>& images):
             DataProvider<Dtype, Qtype>(meanfile, meanvalue, images) {}
   virtual ~OffDataProvider() {
+    setDeviceId(this->deviceId_);
     delete [] reinterpret_cast<float*>(cpuData_[0]);
     delete cpuData_;
+    delete [] reinterpret_cast<char*>(syncCpuData_[0]);
+    delete syncCpuData_;
+    for (auto ptr : inPtrVector_) {
+      for (int i = 0; i < this->runner_->inBlobNum(); i++) {
+        cnrtFree(ptr[i]);
+      }
+      if (ptr != nullptr) free(ptr);
+    }
+    for (auto ptr : outPtrVector_) {
+      for (int i = 0; i < this->runner_->outBlobNum(); i++) {
+        cnrtFree(ptr[i]);
+      }
+      if (ptr != nullptr) free(ptr);
+    }
   }
+  inline void pushInPtrVector(Dtype* data) { inPtrVector_.push_back(data); }
+  inline void pushOutPtrVector(Dtype* data) { outPtrVector_.push_back(data); }
   virtual void runParallel();
   virtual void runSerial();
 
@@ -63,5 +80,8 @@ class OffDataProvider: public DataProvider<Dtype, Qtype>{
 
   private:
   Dtype* cpuData_;
+  Dtype* syncCpuData_;
+  vector<Dtype*> inPtrVector_;
+  vector<Dtype*> outPtrVector_;
 };
 #endif  // EXAMPLES_COMMON_INCLUDE_OFF_DATA_PROVIDER_HPP_

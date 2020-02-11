@@ -2,7 +2,7 @@
 All modification made by Cambricon Corporation: © 2018--2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -38,7 +38,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 namespace caffe {
 /**
- * @brief Compute the index of the @f$ K @f$ max values for each datum across
+ * @brief MLU acceleration of ArgMaxLayer
+ *        ArgMaxLayer Compute the index of the @f$ K @f$ max values for each datum across
  *        specified axis or full image.
  */
 template <typename Dtype>
@@ -59,17 +60,18 @@ class MLUArgMaxLayer : public ArgMaxLayer<Dtype> {
   explicit MLUArgMaxLayer(const LayerParameter& param)
       : ArgMaxLayer<Dtype>(param),
         bottom_reshape_param_ptr_(nullptr),
-        concat_param_ptr_(nullptr),
-
         bottom_reshape_op_ptr_(nullptr),
         concat_op_ptr_(nullptr),
         topk_op_ptr_(nullptr),
         cast_op_ptr_(nullptr),
-
         value_blob_(nullptr),
         index_blob_(nullptr),
         bottom_reshape_blob_(nullptr),
-        cast_blob_(nullptr) {}
+        cast_blob_(nullptr),
+        trans_d2h_layout_(nullptr),
+        trans_d2h_param_(nullptr),
+        trans_h2d_layout_(nullptr),
+        trans_h2d_param_(nullptr) {}
 
   virtual void LayerSetUp(const vector<Blob<Dtype>*>& bottom,
                           const vector<Blob<Dtype>*>& top);
@@ -82,7 +84,15 @@ class MLUArgMaxLayer : public ArgMaxLayer<Dtype> {
   protected:
   /**
    * @param bottom input Blob vector (length 1)
-   * @param top   output Blob vector (length 1)
+   *   -# @f$ (N \times C \times H \times W) @f$
+   *      the inputs @f$ x @f$
+   * @param top output Blob vector (length 1)
+   *   -# @f$ (N \times 1 \times K) @f$ or, if out_max_val
+   *      @f$ (N \times 2 \times K) @f$ unless axis set than e.g.
+   *      @f$ (N \times K \times H \times W) @f$ if axis == 1
+   *      the computed outputs @f$
+   *       y_n = \arg\max\limits_i x_{ni}
+   *      @f$ (for @f$ K = 1 @f$).
    */
   virtual void MLUDestroyOp();
   virtual void MLUCreateOpBindData(const vector<Blob<Dtype>*>& bottom,
@@ -92,8 +102,6 @@ class MLUArgMaxLayer : public ArgMaxLayer<Dtype> {
                            const vector<Blob<Dtype>*>& top);
 
   cnmlReshapeOpParam_t bottom_reshape_param_ptr_;
-  cnmlConcatOpParam_t concat_param_ptr_;
-
   cnmlBaseOp_t bottom_reshape_op_ptr_;
   cnmlBaseOp_t concat_op_ptr_;
   cnmlBaseOp_t topk_op_ptr_;
@@ -103,6 +111,12 @@ class MLUArgMaxLayer : public ArgMaxLayer<Dtype> {
   Blob<Dtype>* index_blob_;
   Blob<Dtype>* bottom_reshape_blob_;
   Blob<Dtype>* cast_blob_;
+  Blob<Dtype>  d2h_blob_;
+  Blob<Dtype>  h2d_blob_;
+  cnmlBaseOp_t trans_d2h_layout_;  // NHWC --> NCHW
+  cnmlNdTransposeOpParam_t trans_d2h_param_;
+  cnmlBaseOp_t trans_h2d_layout_;  // NCHW --> NHWC
+  cnmlNdTransposeOpParam_t trans_h2d_param_;
 };
 
 }  // namespace caffe

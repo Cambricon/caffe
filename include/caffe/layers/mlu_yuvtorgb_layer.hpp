@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -29,6 +29,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #ifndef INCLUDE_CAFFE_LAYERS_MLU_YUVTORGB_LAYER_HPP_
 #define INCLUDE_CAFFE_LAYERS_MLU_YUVTORGB_LAYER_HPP_
+#ifdef USE_MLU
 
 #include <vector>
 #include "caffe/blob.hpp"
@@ -37,8 +38,9 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 namespace caffe {
 
-#ifdef USE_MLU
-
+/**
+ * @brief CNML implementation of YUVtoRGB Layer
+ */
 template <typename Dtype>
 class MLUYUVtoRGBLayer : public Layer<Dtype> {
   public:
@@ -77,6 +79,8 @@ class MLUYUVtoRGBLayer : public Layer<Dtype> {
     virtual inline bool mfus_supported() { return true; }
     virtual void fuse(MFusion<Dtype>* fuser);
     virtual inline const char* type() const { return "MLUYUVtoRGB"; }
+    virtual inline int ExactNumBottomBlobs() const { return 2; }
+    virtual inline int ExactNumTopBlobs() const { return 1; }
 
 
   protected:
@@ -108,7 +112,7 @@ class MLUYUVtoRGBLayer : public Layer<Dtype> {
     cnmlRgbType_t rgb_type;
     cnmlBaseOp_t yuv2rgb_op_ptr_;
 };
-#endif  // USE_MLU
-
 }  // namespace caffe
+
+#endif  // USE_MLU
 #endif  // INCLUDE_CAFFE_LAYERS_MLU_YUVTORGB_LAYER_HPP_

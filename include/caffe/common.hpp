@@ -2,7 +2,7 @@
 All modification made by Cambricon Corporation: © 2018--2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -34,7 +34,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <boost/shared_ptr.hpp>
 #include <gflags/gflags.h>
 #include <glog/logging.h>
-
 #include <climits>
 #include <cmath>
 #include <fstream>
@@ -45,9 +44,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
-#include <utility>  // pair
+#include <utility>
 #include <vector>
-
 #include "caffe/proto/caffe.pb.h"
 #include "caffe/util/device_alternate.hpp"
 
@@ -260,56 +258,31 @@ class Caffe {
   inline static bool root_solver() { return Get().solver_rank_ == 0; }
 #ifdef USE_MLU
   inline static void set_mlu_device(int dev_id) { Get().setDevice(dev_id); }
-  inline static void set_functype(string functype) {
-    if (functype != "1H8" && functype != "1H16") {
-      LOG(FATAL) << "The value of functype can only be set to 1H8 or 1H16";
-    } else if (functype == "1H8") {
-      Get().affinity_ = 0x02;
-    }
-  }
-  inline static void setModelParallel(int model_parallel) {
-    if (model_parallel * Get().data_parallel_ <= 32 && model_parallel >= 1) {
-      Get().model_parallel_ = model_parallel;
-    } else {
-      LOG(FATAL) << "Invalid model_parallel,"
-                 << " model_parallel*data_parallel range from 1 to 32";
-    }
-  }
-  inline static int model_parallel() { return Get().model_parallel_; }
-  inline static void setDataParallel(int data_parallel) {
-    if (data_parallel * Get().model_parallel_ <= 32 && data_parallel >= 1) {
-      Get().data_parallel_ = data_parallel;
-    } else {
-      LOG(FATAL) << "Invalid data_parallel,"
-                 << " data_parallel*model_parallel range from 1 to 32";
-    }
-  }
-  inline static int data_parallel() { return Get().data_parallel_; }
 
-  inline static void setDataStrategy(const vector<int>& datastrategy) {
-    Get().in_datastrategy_ = datastrategy[0];
-    Get().out_datastrategy_ = datastrategy[1];
+  inline static void setBatchsize(int batchsize) {
+    if (batchsize >= 1) {
+      Get().batchsize_ = batchsize;
+    } else {
+      LOG(FATAL) << "Invalid batchsize,"
+                 << " batchsize should be greater or equal than 1";
+    }
   }
-  inline static int getInDataStrategy() {
-    return Get().in_datastrategy_;
+  inline static int batchsize() { return Get().batchsize_; }
+
+  inline static void setCoreNumber(int core_number) {
+    if (core_number <= 32 && core_number >= 1) {
+      Get().core_number_ = core_number;
+    } else {
+      LOG(FATAL) << "Invalid core_number, core_number should range from 1 to 32";
+    }
   }
-  inline static int getOutDataStrategy() {
-    return Get().out_datastrategy_;
+  inline static int core_number() { return Get().core_number_; }
+
+  inline static void setSimpleFlag(bool simpleFlag) {
+    Get().simpleFlag_ = simpleFlag;
   }
-  inline static cnmlDataPreprocessStrategy_t in_datastrategy() {
-    cnmlDataPreprocessStrategy_t data_strategy;
-    int value = Get().in_datastrategy_;
-    if (value != -1)
-      data_strategy = static_cast<cnmlDataPreprocessStrategy_t>(value);
-    return data_strategy;
-  }
-  inline static cnmlDataPreprocessStrategy_t out_datastrategy() {
-    cnmlDataPreprocessStrategy_t data_strategy;
-    int value = Get().out_datastrategy_;
-    if (value != -1)
-      data_strategy = static_cast<cnmlDataPreprocessStrategy_t>(value);
-    return data_strategy;
-  }
+  inline static int simpleFlag() { return Get().simpleFlag_; }
+
   inline static void setCpuDataOrder(const vector<int>& dataorder) {
     Get().in_dataorder_ = dataorder[0];
     Get().out_dataorder_ = dataorder[1];
@@ -363,6 +336,14 @@ class Caffe {
       NOT_IMPLEMENTED << " Caffe::ReshapeMode " << mode;
     }
   }
+  inline static void setDetectOpMode(int status) {
+    if (status) {
+      Get().detectop_mode_ = true;
+    } else {
+      Get().detectop_mode_ = false;
+    }
+  }
+  inline static bool getDetectOpMode() { return Get().detectop_mode_; }
   void setDevice(int dev_id) {
     if (Caffe::FakeDevice != Caffe::DeviceFlag) {
       unsigned dev_count;
@@ -383,12 +364,11 @@ class Caffe {
   }
   void setCoreVersion(cnmlCoreVersion_t v) { core_version_ = v; }
   void setCoreVersion(const std::string& v) {
-    if (boost::iequals(v, "1H8")) {
-      core_version_ = CNML_1H8;
-    } else if (boost::iequals(v, "1H16")) {
-      core_version_ = CNML_1H16;
-    } else if (boost::iequals(v, "MLU100")) {
-      core_version_ = CNML_C10;
+    if (boost::iequals(v, "MLU220")) {
+      core_version_ = CNML_MLU220;
+    } else if (boost::iequals(v, "VENTI")
+        || (boost::iequals(v, "MLU270"))) {
+      core_version_ = CNML_MLU270;
     } else {
       LOG(FATAL) << "unknown core version: " << v;
     }
@@ -397,8 +377,6 @@ class Caffe {
   void setDevChannelId(int id) {
     CHECK_GE(id, 0);
     CHECK_LE(id, 3);
-    LOG(WARNING) << "Using MLU Channel " << id;
-    CNRT_CHECK(cnrtSetCurrentChannel((cnrtChannelType_t)id));
   }
   cnrtQueue_t devQueue() {
     if (queue_ == nullptr) {
@@ -406,6 +384,26 @@ class Caffe {
     }
     return queue_;
   }
+  inline static void setTopDataType(string dtype) {
+    BaseDataType dt_type = DT_INVALID;
+    if (dtype == "FLOAT16") {
+      dt_type = DT_FLOAT16;
+    } else if (dtype == "FLOAT32") {
+      dt_type = DT_FLOAT32;
+    } else {
+      LOG(FATAL) << "Unsupported output data type setting: " << dtype;
+    }
+    Get().top_dtype_ = dt_type;
+  }
+  inline static BaseDataType topDataType() { return Get().top_dtype_; }
+
+static int genModeltoMemory(const string& v,
+                      const string& model,
+                      const string& weights,
+                      int usebangop,
+                      void** buffer,
+                      int* modelsize);
+
 #endif
 
   protected:
@@ -427,18 +425,20 @@ class Caffe {
   Caffe();
 
 #ifdef USE_MLU
-  int data_parallel_;  // The number of cores used, each core processes independant frame.
-  int model_parallel_;  // The number of cores used, cores process the same frame.
+  int core_number_;
+  int batchsize_;
+  bool simpleFlag_;
+  BaseDataType top_dtype_;
   int channel_id_;
-  int in_datastrategy_;
-  int out_datastrategy_;
   unsigned int affinity_;
   cnrtQueue_t queue_;
   cnrtInvokeFuncParam_t compute_forw_param_;
   cnmlCoreVersion_t core_version_;
   ReshapeMode reshape_mode_ = ReshapeMode::SETUPONLY;
+  bool detectop_mode_;
   int in_dataorder_;
   int out_dataorder_;
+  int parallel_;
 #endif
 
   DISABLE_COPY_AND_ASSIGN(Caffe);

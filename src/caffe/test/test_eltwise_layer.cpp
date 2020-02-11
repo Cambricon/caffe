@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -402,43 +402,6 @@ TYPED_TEST(MLUEltwiseLayerTest, TestSumCoeff) {
   BOTTOM(stream);
   PARAM(param);
 }
-
-TYPED_TEST(MLUEltwiseLayerTest, TestMAX) {
-  typedef typename TypeParam::Dtype Dtype;
-  LayerParameter layer_param;
-  EltwiseParameter* eltwise_param = layer_param.mutable_eltwise_param();
-  eltwise_param->set_operation(EltwiseParameter_EltwiseOp_MAX);
-  shared_ptr<MLUEltwiseLayer<Dtype> > layer(
-      new MLUEltwiseLayer<Dtype>(layer_param));
-  layer->SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
-  layer->Reshape_dispatch(this->blob_bottom_vec_, this->blob_top_vec_);
-  layer->Forward(this->blob_bottom_vec_, this->blob_top_vec_);
-  const Dtype* data = this->blob_top_->cpu_data();
-  const int count = this->blob_top_->count();
-  const Dtype* in_data_a = this->blob_bottom_a_->cpu_data();
-  const Dtype* in_data_b = this->blob_bottom_b_->cpu_data();
-  const Dtype* in_data_c = this->blob_bottom_c_->cpu_data();
-  const Dtype* in_data_d = this->blob_bottom_d_->cpu_data();
-
-  float err_sum = 0, sum = 0;
-  for (int i = 0; i < count; ++i) {
-    EXPECT_EQ(data[i], std::max(std::max(in_data_a[i], in_data_b[i]),
-                                std::max(in_data_c[i], in_data_d[i])));
-    err_sum += std::abs(data[i] - std::max(std::max(in_data_a[i], in_data_b[i]),
-        std::max(in_data_c[i], in_data_d[i]) ));
-    sum += std::abs(data[i]);
-  }
-  std::ostringstream stream, param;
-  stream << "bottom1:" << this->blob_bottom_a_->shape_string().c_str() << "\t"
-    << "bottom2:" << this->blob_bottom_b_->shape_string().c_str();
-  param << "operation:" << eltwise_param->operation();
-  BOTTOM(stream);
-  EXPECT_LE(err_sum / sum, 1e-2);
-  ERR_RATE(err_sum/sum);
-  PARAM(param);
-  EVENT_TIME(layer->get_event_time());
-}
-
 TYPED_TEST(MLUEltwiseLayerTest, TestProdTwo) {
   typedef typename TypeParam::Dtype Dtype;
   LayerParameter layer_param;
@@ -550,42 +513,6 @@ TYPED_TEST(MLUEltwiseLayerTest, TestSumCoeffTwo) {
   param << "operation:" << eltwise_param->operation();
   BOTTOM(stream);
   PARAM(param);
-  ERR_RATE(err_sum/sum);
-  EVENT_TIME(layer->get_event_time());
-}
-
-TYPED_TEST(MLUEltwiseLayerTest, TestMAXTwo) {
-  typedef typename TypeParam::Dtype Dtype;
-  LayerParameter layer_param;
-  EltwiseParameter* eltwise_param = layer_param.mutable_eltwise_param();
-  eltwise_param->set_operation(EltwiseParameter_EltwiseOp_MAX);
-
-  shared_ptr<MLUEltwiseLayer<Dtype> > layer(
-      new MLUEltwiseLayer<Dtype>(layer_param));
-  this->blob_bottom_vec_.clear();
-  this->blob_bottom_vec_.push_back(this->blob_bottom_a_);
-  this->blob_bottom_vec_.push_back(this->blob_bottom_b_);
-  layer->SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
-  layer->Reshape_dispatch(this->blob_bottom_vec_, this->blob_top_vec_);
-  layer->Forward(this->blob_bottom_vec_, this->blob_top_vec_);
-
-  const Dtype* data = this->blob_top_->cpu_data();
-  const int count = this->blob_top_->count();
-  const Dtype* in_data_a = this->blob_bottom_a_->cpu_data();
-  const Dtype* in_data_b = this->blob_bottom_b_->cpu_data();
-  float err_sum = 0, sum = 0;
-  for (int i = 0; i < count; ++i) {
-    EXPECT_EQ(data[i], std::max(in_data_a[i], in_data_b[i]));
-    err_sum += std::abs(data[i] - std::max(in_data_a[i], in_data_b[i]));
-    sum += std::abs(std::max(in_data_a[i], in_data_b[i]));
-  }
-  std::ostringstream stream, param;
-  stream << "bottom1:" << this->blob_bottom_a_->shape_string().c_str() << "\t"
-    << "bottom2:" << this->blob_bottom_b_->shape_string().c_str();
-  param << "operation:" << eltwise_param->operation();
-  BOTTOM(stream);
-  PARAM(param);
-  EXPECT_LE(err_sum / sum, 1e-2);
   ERR_RATE(err_sum/sum);
   EVENT_TIME(layer->get_event_time());
 }
@@ -786,49 +713,6 @@ TYPED_TEST(MFUSEltwiseLayerTest, TestSumCoeff) {
   EVENT_TIME(fuser.get_event_time());
 }
 
-TYPED_TEST(MFUSEltwiseLayerTest, TestMAX) {
-  typedef typename TypeParam::Dtype Dtype;
-  LayerParameter layer_param;
-  EltwiseParameter* eltwise_param = layer_param.mutable_eltwise_param();
-  eltwise_param->set_operation(EltwiseParameter_EltwiseOp_MAX);
-  shared_ptr<MLUEltwiseLayer<Dtype> > layer(
-      new MLUEltwiseLayer<Dtype>(layer_param));
-  layer->SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
-  ASSERT_TRUE(layer->mfus_supported());
-
-  MFusion<Dtype> fuser;
-  fuser.reset();
-  fuser.addInputs(this->blob_bottom_vec_);
-  fuser.addOutputs(this->blob_top_vec_);
-  layer->Reshape_dispatch(this->blob_bottom_vec_, this->blob_top_vec_);
-  layer->fuse(&fuser);
-  fuser.compile();
-  fuser.forward();
-  const Dtype* data = this->blob_top_->cpu_data();
-  const int count = this->blob_top_->count();
-  const Dtype* in_data_a = this->blob_bottom_a_->cpu_data();
-  const Dtype* in_data_b = this->blob_bottom_b_->cpu_data();
-  const Dtype* in_data_c = this->blob_bottom_c_->cpu_data();
-  const Dtype* in_data_d = this->blob_bottom_d_->cpu_data();
-  float err_sum = 0, sum = 0;
-  for (int i = 0; i < count; ++i) {
-    EXPECT_EQ(data[i], std::max(std::max(in_data_a[i], in_data_b[i]),
-                                std::max(in_data_c[i], in_data_d[i])));
-    err_sum = std::abs(data[i] - std::max(std::max(in_data_a[i], in_data_b[i]),
-        std::max(in_data_c[i], in_data_d[i])));
-    sum += std::abs(data[i]);
-  }
-  std::ostringstream stream, param;
-  stream << "bottom1:" << this->blob_bottom_a_->shape_string().c_str() << "\t"
-    << "bottom2:" << this->blob_bottom_b_->shape_string().c_str();
-  param << "operation:" << eltwise_param->operation();
-  BOTTOM(stream);
-  PARAM(param);
-  EXPECT_LE(err_sum/sum, 1e-2);
-  ERR_RATE(err_sum/sum);
-  EVENT_TIME(fuser.get_event_time());
-}
-
 TYPED_TEST(MFUSEltwiseLayerTest, TestProdTwo) {
   typedef typename TypeParam::Dtype Dtype;
   LayerParameter layer_param;
@@ -968,49 +852,6 @@ TYPED_TEST(MFUSEltwiseLayerTest, TestSumCoeffTwo) {
   EVENT_TIME(fuser.get_event_time());
 }
 
-TYPED_TEST(MFUSEltwiseLayerTest, TestMAXTwo) {
-  typedef typename TypeParam::Dtype Dtype;
-  LayerParameter layer_param;
-  EltwiseParameter* eltwise_param = layer_param.mutable_eltwise_param();
-  eltwise_param->set_operation(EltwiseParameter_EltwiseOp_MAX);
-
-  shared_ptr<MLUEltwiseLayer<Dtype> > layer(
-      new MLUEltwiseLayer<Dtype>(layer_param));
-  this->blob_bottom_vec_.clear();
-  this->blob_bottom_vec_.push_back(this->blob_bottom_a_);
-  this->blob_bottom_vec_.push_back(this->blob_bottom_b_);
-  layer->SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
-  ASSERT_TRUE(layer->mfus_supported());
-
-  MFusion<Dtype> fuser;
-  fuser.reset();
-  fuser.addInputs(this->blob_bottom_vec_);
-  fuser.addOutputs(this->blob_top_vec_);
-  layer->Reshape_dispatch(this->blob_bottom_vec_, this->blob_top_vec_);
-  layer->fuse(&fuser);
-  fuser.compile();
-  fuser.forward();
-
-  const Dtype* data = this->blob_top_->cpu_data();
-  const int count = this->blob_top_->count();
-  const Dtype* in_data_a = this->blob_bottom_a_->cpu_data();
-  const Dtype* in_data_b = this->blob_bottom_b_->cpu_data();
-  float err_sum = 0, sum = 0;
-  for (int i = 0; i < count; ++i) {
-    EXPECT_EQ(data[i], std::max(in_data_a[i], in_data_b[i]));
-    err_sum += std::abs(data[i] - std::max(in_data_a[i], in_data_b[i]));
-    sum += std::abs(std::max(in_data_a[i], in_data_b[i]));
-  }
-  std::ostringstream stream, param;
-  stream << "bottom1:" << this->blob_bottom_a_->shape_string().c_str() << "\t"
-    << "bottom2:" << this->blob_bottom_b_->shape_string().c_str();
-  param << "operation:" << eltwise_param->operation();
-  BOTTOM(stream);
-  PARAM(param);
-  EXPECT_LE(err_sum / sum, 1e-2);
-  ERR_RATE(err_sum/sum);
-  EVENT_TIME(fuser.get_event_time());
-}
 #endif
 
 }  // namespace caffe

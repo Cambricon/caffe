@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -110,6 +110,8 @@ int main(int argc, char* argv[]) {
   LOG(INFO) << "accuracy5: " << 1.0 * acc5 / imageNum << " ("
             << acc5 << "/" << imageNum << ")";
   LOG(INFO) << "End2end throughput fps: " << imageNum / execTime * 1e6;
+  int batchsize = pipeline->runner()->n();
+  saveResult(imageNum, acc1, acc5, (-1), (-1), execTime, 1, batchsize);
 
   delete pipeline;
 

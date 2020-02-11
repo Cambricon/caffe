@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -103,8 +103,11 @@ int main(int argc, char* argv[]) {
   pipeline->runSerial();
   timer.log("Total execution time");
   float execTime = timer.getDuration();
-
-  LOG(INFO) << "End2end throughput fps: " << imageNum / execTime * 1e6;
+  
+  float mluTime = runner->runTime();
+  int batchsize = runner->n();
+  printPerf(imageNum, execTime, mluTime, 1, batchsize);
+  saveResult(imageNum, (-1), (-1), (-1), (-1), execTime);
 
   delete pipeline;
 

@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -49,6 +49,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
   getenv("TEST_SOURCE_PATH") == nullptr ? \
   "src/caffe/test/test_data/" : getenv("TEST_SOURCE_PATH")
 #endif
+#define core_version getenv("GTEST_CORE_VERSION")
 
 #define OUTPUT(message, value) \
   this->RecordProperty(message, value);
@@ -77,10 +78,12 @@ class MultiDeviceTest : public ::testing::Test {
 #ifdef USE_MLU
     if (TypeParam::device != Caffe::CPU) {
       cnmlInit(0);
-      Caffe::set_rt_core(CNML_C10);
+      std::cout<<core_version;
+      Caffe::set_rt_core("MLU270");
+      if (core_version != NULL)
+          Caffe::set_rt_core(core_version);
       Caffe::set_mlu_device(0);
-      Caffe::setModelParallel(1);
-      Caffe::setDataParallel(1);
+      Caffe::setDetectOpMode(0);
       Caffe::setReshapeMode(caffe::Caffe::ReshapeMode::SETUPONLY);
     }
 #endif
@@ -88,10 +91,10 @@ class MultiDeviceTest : public ::testing::Test {
   }
   virtual ~MultiDeviceTest() {
 #ifdef USE_MLU
-    if (TypeParam::device > 0) {
-      Caffe::freeQueue();
-      cnmlExit();
-    }
+  if (TypeParam::device > 0) {
+    Caffe::freeQueue();
+    cnmlExit();
+  }
 #endif
   }
 };
