@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -46,7 +46,7 @@ namespace caffe {
  */
 template <typename Dtype>
 class DataTransformer {
-  public:
+ public:
   explicit DataTransformer(const TransformationParameter& param, Phase phase);
   virtual ~DataTransformer() {}
 
@@ -67,6 +67,8 @@ class DataTransformer {
    *    set_cpu_data() is used. See data_layer.cpp for an example.
    */
   void Transform(const Datum& datum, Blob<Dtype>* transformed_blob);
+
+  void VideoTransform(const VolumeDatum& datum, Blob<Dtype>* transformed_blob);
 
   /**
    * @brief Applies the transformation defined in the data layer's
@@ -202,6 +204,14 @@ class DataTransformer {
   /**
    * @brief Infers the shape of transformed_blob will have when
    *    the transformation is applied to the data.
+   *
+   * @param VolumeDatum
+   *    Datum containing the data to be transformed.
+   */
+  vector<int> InferBlobShape(const VolumeDatum& datum);
+  /**
+   * @brief Infers the shape of transformed_blob will have when
+   *    the transformation is applied to the data.
    *    It uses the first element to infer the shape of the blob.
    *
    * @param datum_vector
@@ -228,7 +238,7 @@ class DataTransformer {
   vector<int> InferBlobShape(const cv::Mat& cv_img);
 #endif  // USE_OPENCV
 
-  protected:
+ protected:
   /**
   * @brief Generates a random integer from Uniform({0, 1, ..., n-1}).
   *
@@ -242,6 +252,7 @@ class DataTransformer {
   void Transform(const Datum& datum, Dtype* transformed_data,
                  NormalizedBBox* crop_bbox, bool* do_mirror);
   void Transform(const Datum& datum, Dtype* transformed_data);
+  void VideoTransform(const VolumeDatum& datum, Dtype* transformed_data);
 
   /**
    * @brief Applies the transformation defined in the data layer's

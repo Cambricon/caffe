@@ -31,10 +31,14 @@ def cmpData(filenamea, filenameb):
 def cmpDirData(dir1, dir2):
     dir1 = dir1.rstrip('/')
     dir2 = dir2.rstrip('/')
-    cmd_str = "ls %s > tmp_list" %dir1
+    cmd_str = "ls %s > list_tmp" %dir1
     os.system(cmd_str)
-    files = open("tmp_list")
+    files = open("list_tmp")
+    input_data = True
     for item in files.readlines():
+        if (input_data):
+           input_data=False
+           continue
         item = item.strip()
         file1 = dir1 + '/' + item
         file2 = dir2 + '/' + item
@@ -42,7 +46,4 @@ def cmpDirData(dir1, dir2):
         print (file1 + " errRate = %f" %errRate)
 
 if __name__ == "__main__":
-    errRate, errorList = cmpDirData(sys.argv[1], sys.argv[2])
-    print "errRate = %f" % errRate
-    if len(errorList) > 0:
-        print errorList[0]
+    cmpDirData(sys.argv[1], sys.argv[2])

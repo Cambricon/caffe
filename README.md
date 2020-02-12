@@ -1,18 +1,31 @@
 # Cambricon Caffe
+To support Cambricon deep learning processor, the open source deep learning programming framework [BVLC-Caffe](https://github.com/BVLC/caffe) has been modified. New functions such as off-line multi-core inference, online fusion mode, support of multiple cards and others are developed. Cambricon Caffe focus on inference, it is dedicated to improving [BVLC-Caffe](https://github.com/BVLC/caffe) performance when running on Machine Learning Unit(MLU).
 
-[![Build Status](https://travis-ci.com/Cambricon/caffe.svg?branch=master)](https://travis-ci.com/Cambricon/caffe)
-[![License](https://img.shields.io/badge/license-BSD-blue.svg)](LICENSE)
 
-To support Cambricon deep learning processor, the open source deep learning programming framework [BVLC-Caffe](https://github.com/BVLC/caffe) has been modified. New functions such as off-line multi-core inference, online fusion mode, support of multiple cards and others are developed. Cambricon Caffe focuses on inference, it is dedicated to improving [BVLC-Caffe](https://github.com/BVLC/caffe) performance when running on Machine Learning Unit(MLU).
+## Cambricon Caffe Version
+Cambricon Caffe supports several Cambricon Machine Learning Unit, please see below for more details.
+
+* **For serials of MLU100:**
+
+You need to switch to the release_v1.0.0 branch first, and see below for how to use it.
+
+* **For serials of MLU270:**
+
+You need to switch to the master branch first, and see below for how to use it.
 
 ## Prerequisites
 Cambricon Caffe has several dependencies as same as [BVLC-Caffe](https://github.com/BVLC/caffe) does, please refer to [caffe.berkeleyvision.org](https://caffe.berkeleyvision.org/installation.html) for details.
 
 ## Building
-You need to firstly clone [Cambricon Caffe](https://github.com/Cambricon/caffe), and then go to **scripts** folder to compile Cambricon Caffe: 
+You need to firstly clone [Cambricon Caffe](https://github.com/Cambricon/caffe), and then go to **scripts** folder to compile Cambricon Caffe:
+
+* **For serials of MLU100:**
+
 ```
 git clone git@github.com:Cambricon/caffe.git
-cd caffe/scripts
+cd caffe
+git checkout release_v1.0.0
+cd scripts
 ```
 To build Cambricon Caffe, you could use **build_cambriconcaffe.sh**, which is in the scripts folder. It has three options:
 - -debug: build Cambricon Caffe with debug information.
@@ -31,7 +44,7 @@ export CROSS_TOOLCHAIN_PATH=your_toolchain_path/bin  // please replace your_tool
 ```
 There is another dependent library set **arm32_linux_lib**, which is necessary for the compiling of Cambricon Caffe. It has been pre-compiled and is available for downloading on Cambricon's FTP site. Please clone caffe_boost, then run **download_dependency.sh**. The script will help download it.
 
-The download_dependency.sh script needs one argument. The argument meaning is listed below: 
+The download_dependency.sh script needs one argument. The argument meaning is listed below:
 - 1: download arm32_linux_lib.
 - 2: download android_lib_r17b.
 
@@ -61,13 +74,28 @@ git clone git@github.com:Cambricon/caffe_boost.git
 cd caffe_boost/scripts
 ./download_dependency.sh 2
 ```
-Finally, set **ARM64_R17_ANDROID_LIB_ROOT** environment variable for android_lib_r17b: 
+Finally, set **ARM64_R17_ANDROID_LIB_ROOT** environment variable for android_lib_r17b:
 ```
 export ARM64_R17_ANDROID_LIB_ROOT=your_android_lib_path  // please replace your_android_lib_path with your actual path
 ```
 Once you have finished setting the environment variables, you could compile Cambricon Caffe for arm64 platform:
 ```
 ./build_cambriconcaffe.sh -platform arm64
+```
+
+* **For serials of MLU270:**
+
+```
+git clone git@github.com:Cambricon/caffe.git
+cd caffe/scripts
+```
+To build Cambricon Caffe, you could use **build_cambriconcaffe.sh**, which is in the scripts folder. It has three options:
+- -debug: build Cambricon Caffe with debug information.
+- -release: build Cambricon Caffe for production environment. This is the default build type.
+- -platform: specify platform argument. Default platform is x86.
+
+```
+./build_cambriconcaffe.sh
 ```
 
 ## License and Citation
@@ -122,4 +150,14 @@ If you use YOLOv3 in your work please cite it!
       author={Redmon, Joseph and Farhadi, Ali},
       journal = {arXiv},
       year={2018}
+    }
+
+# R-FCN
+If you use R-FCN in your work please cite it!
+
+    @article{dai16rfcn,
+      title={{R-FCN}: Object Detection via Region-based Fully Convolution Networks},
+      author={Jifeng Dai, Yi Li, Kaiming He, Jian Sun},
+      journal = {arXiv preprint arXiv:1605.06409},
+      year={2016}
     }

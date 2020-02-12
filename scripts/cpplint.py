@@ -6165,12 +6165,12 @@ def extractFileNameAndLines(lines):
 def main():
   child_ = subprocess.Popen("pwd", shell=True, stdout = subprocess.PIPE, stdin = subprocess.PIPE)
   pathInfo = child_.stdout.read()
-  child1 = subprocess.Popen("git show ", shell=True, stdout = subprocess.PIPE, stdin = subprocess.PIPE)
+  child1 = subprocess.Popen("git diff ", shell=True, stdout = subprocess.PIPE, stdin = subprocess.PIPE)
   if (len(sys.argv)>1):
     if (len(sys.argv[1]) == 40):
       commitid = sys.argv[1]
       child1.kill()
-      child1 = subprocess.Popen("git show " + commitid, shell=True, stdout = subprocess.PIPE, stdin = subprocess.PIPE)
+      child1 = subprocess.Popen("git diff origin/" + sys.argv[1], shell=True, stdout = subprocess.PIPE, stdin = subprocess.PIPE)
   if (len(sys.argv)>2):
     pathFrom = sys.argv[2]
   lines = child1.stdout.read().split('\n')

@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -68,12 +68,12 @@ int main(int argc, char* argv[]) {
 #ifndef GFLAGS_GFLAGS_H_
   namespace gflags = google;
 #endif
-  gflags::SetUsageMessage("Do detection using SSD mode.\n"
+  gflags::SetUsageMessage("Do detection using SSD offline mode.\n"
         "Usage:\n"
         "    ssd_offline [FLAGS] model_file list_file\n");
   gflags::ParseCommandLineFlags(&argc, &argv, true);
   if (argc == 0) {
-    gflags::ShowUsageWithFlagsRestrict(argv[0], "examples/ssd/ssd_offline/");
+    gflags::ShowUsageWithFlagsRestrict(argv[0], "examples/ssd/ssd_offline");
     return 1;
   }
 
@@ -122,7 +122,9 @@ int main(int argc, char* argv[]) {
   timer.log("Total execution time");
   float execTime = timer.getDuration();
   float mluTime = pipeline->runner()->runTime();
-  printPerf(imageNum, execTime, mluTime);
+  int batchsize = pipeline->runner()->n();
+  printPerf(imageNum, execTime, mluTime, 1, batchsize);
+  saveResult(imageNum, (-1), (-1), (-1), mluTime, execTime, 1, batchsize);
 
   delete pipeline;
   cnrtDestroy();

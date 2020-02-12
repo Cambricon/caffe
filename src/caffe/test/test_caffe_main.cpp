@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -61,19 +61,6 @@ int main(int argc, char** argv) {
   LOG(INFO) << "Current device id: " << device;
   cudaGetDeviceProperties(&CAFFE_TEST_CUDA_PROP, device);
   LOG(INFO) << "Current device name: " << CAFFE_TEST_CUDA_PROP.name;
-#endif
-
-#ifdef USE_MLU
-  cnrtInit(0);
-  unsigned devNum;
-  CNRT_CHECK(cnrtGetDeviceCount(&devNum));
-  LOG(INFO) << "The number of MLU devices: " << devNum;
-  CHECK_GT(devNum, 0) << "No device found";
-  cnrtDev_t dev;
-  CNRT_CHECK(cnrtGetDeviceHandle(&dev, 0));
-  LOG(INFO) << "Current divice id : 0";
-  CNRT_CHECK(cnrtSetCurrentDevice(dev));
-  cnrtDestroy();
 #endif
   // invoke the test.
   return RUN_ALL_TESTS();

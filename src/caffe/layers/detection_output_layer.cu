@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -285,6 +285,7 @@ void DetectionOutputLayer<Dtype>::Forward_gpu(
           std::ofstream outfile;
           outfile.open(out_file.string().c_str(), std::ofstream::out);
 
+#if not defined CROSS_COMPILE && not defined CROSS_COMPILE_ARM64
           boost::regex exp("\"(null|true|false|-?[0-9]+(\\.[0-9]+)?)\"");
           ptree output;
           output.add_child("detections", detections_);
@@ -293,6 +294,9 @@ void DetectionOutputLayer<Dtype>::Forward_gpu(
           std::string rv = boost::regex_replace(ss.str(), exp, "$1");
           outfile << rv.substr(rv.find("["), rv.rfind("]") - rv.find("["))
               << std::endl << "]" << std::endl;
+#else
+          LOG(FATAL) << "Output types are not supported.";
+#endif
         } else if (output_format_ == "ILSVRC") {
           boost::filesystem::path output_directory(output_directory_);
           boost::filesystem::path file(output_name_prefix_ + ".txt");

@@ -2,7 +2,7 @@
 All modification made by Cambricon Corporation: © 2018--2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -28,26 +28,23 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
 #ifdef USE_MLU
-
 #include <algorithm>
 #include <memory>
 #include <string>
 #include <vector>
-
 #include "caffe/filler.hpp"
-#include "caffe/layers/mlu_conv_depthwise_layer.hpp"
-
 #include "caffe/common.hpp"
 #include "caffe/util/io.hpp"
+#include "caffe/layers/mlu_conv_depthwise_layer.hpp"
+
 namespace caffe {
 
 template <typename Dtype>
-void MLUConvolutionDepthwiseLayer<Dtype>::LayerSetUp(
-      const vector<Blob<Dtype>*>& bottom,
-      const vector<Blob<Dtype>*>& top) {
+void MLUConvolutionDepthwiseLayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& bottom,
+                                                     const vector<Blob<Dtype>*>& top) {
   BaseConvolutionLayer<Dtype>::LayerSetUp(bottom, top);
   BaseDataType cpu_dtype = sizeof(Dtype) == 4 ? DT_FLOAT32 : DT_DOUBLE;
-  BaseDataType mlu_dtype = DT_FLOAT16;
+  BaseDataType mlu_dtype = bottom[0]->mlu_type();
   this->blobs_[0].reset(new Blob<Dtype>(this->blobs_[0]->shape(),
         cpu_dtype, mlu_dtype, CNML_FILTER, CNML_CNHW));
   shared_ptr<Filler<Dtype> > weight_filler(GetFiller<Dtype>(
@@ -86,10 +83,13 @@ void MLUConvolutionDepthwiseLayer<Dtype>::MLUCreateOpBindData(
   const int pad_wleft = pad_data[1];
   const int pad_hbottom = pad_data[2];
   const int pad_wright = pad_data[3];
-  add_pad_ = pad_htop != 0 || pad_hbottom !=0 || pad_wleft != 0 || pad_wright != 0;
+
   BaseDataType cpu_dtype = sizeof(Dtype) == 4 ? DT_FLOAT32 : DT_DOUBLE;
+
+  bool pad = pad_htop || pad_hbottom || pad_wleft || pad_wright;
+  add_pad_ = pad && !(pad_htop == pad_hbottom && pad_wleft == pad_wright);
   if (add_pad_) {
-    MLU_CHECK(cnmlCreateAddPadOp4Param(&mlu_addpad_param_ptr_,
+    MLU_CHECK(cnmlCreateAddPadOpParam_V2(&mlu_addpad_param_ptr_,
                                    pad_htop, pad_hbottom, pad_wleft, pad_wright, 0));
     mlu_addpad_op_ptrs_ = new cnmlBaseOp_t[bottom.size()];
     for (int i = 0; i < bottom.size(); i++) {
@@ -108,9 +108,12 @@ void MLUConvolutionDepthwiseLayer<Dtype>::MLUCreateOpBindData(
                                   addpad_[i]->mlu_tensor()));
     }
   }
-  MLU_CHECK(cnmlCreateConvDepthwiseOpParam(&depthwise_param_ptr_,
-                      stride_h,
-                      stride_w));
+
+  MLU_CHECK(cnmlCreateConvDepthwiseOpParam_V2(&depthwise_param_ptr_,
+          stride_h,
+          stride_w,
+          add_pad_? 0: pad_htop * 2,
+          add_pad_? 0: pad_wleft * 2));
   conv_depthwise_op_ptrs_ = new cnmlBaseOp_t[bottom.size()];
   for (int i = 0; i < bottom.size(); i++) {
     MLU_CHECK(cnmlCreateConvDepthwiseOp(&conv_depthwise_op_ptrs_[i],
@@ -122,13 +125,13 @@ void MLUConvolutionDepthwiseLayer<Dtype>::MLUCreateOpBindData(
                              this->bias_term_ ?
                              this->blobs_[1]->mlu_tensor() : nullptr));
 
-    MLU_CHECK(cnmlBindConstData(this->blobs_[0]->mlu_tensor(),
-                               this->blobs_[0]->cpu_tensor(),
-                               this->blobs_[0]->mutable_cpu_data()));
+    MLU_CHECK(cnmlBindConstData_V2(this->blobs_[0]->mlu_tensor(),
+                                   this->blobs_[0]->sync_data(),
+                                   false));
     if ( this->bias_term_ ) {
-        MLU_CHECK(cnmlBindConstData(this->blobs_[1]->mlu_tensor(),
-                               this->blobs_[1]->cpu_tensor(),
-                               this->blobs_[1]->mutable_cpu_data()));
+      MLU_CHECK(cnmlBindConstData_V2(this->blobs_[1]->mlu_tensor(),
+                                     this->blobs_[1]->sync_data(),
+                                     false));
     }
   }
 }
@@ -139,13 +142,13 @@ void MLUConvolutionDepthwiseLayer<Dtype>::MLUCompileOp() {
     for (int i = 0; i < bottom_size_; i++) {
         MLU_CHECK(cnmlCompileBaseOp(mlu_addpad_op_ptrs_[i],
                                     Caffe::rt_core(),
-                                    Caffe::model_parallel()));
+                                    Caffe::core_number()));
     }
   }
   for (int i = 0; i < bottom_size_; i++) {
       MLU_CHECK(cnmlCompileBaseOp(conv_depthwise_op_ptrs_[i],
                                   Caffe::rt_core(),
-                                  Caffe::model_parallel()));
+                                  Caffe::core_number()));
   }
 }
 
@@ -188,9 +191,8 @@ MLUConvolutionDepthwiseLayer<Dtype>::~MLUConvolutionDepthwiseLayer() {
 }
 
 template <typename Dtype>
-void MLUConvolutionDepthwiseLayer<Dtype>::Forward_mlu(
-      const vector<Blob<Dtype>*>& bottom,
-      const vector<Blob<Dtype>*>& top) {
+void MLUConvolutionDepthwiseLayer<Dtype>::Forward_mlu(const vector<Blob<Dtype>*>& bottom,
+                                                      const vector<Blob<Dtype>*>& top) {
   if (add_pad_) {
     for (int i = 0; i < bottom.size(); i++) {
       MLU_CHECK(cnmlComputeAddPadOpForward_V3(mlu_addpad_op_ptrs_[i],
@@ -209,5 +211,6 @@ void MLUConvolutionDepthwiseLayer<Dtype>::Forward_mlu(
 }
 
 INSTANTIATE_CLASS(MLUConvolutionDepthwiseLayer);
+
 }  // namespace caffe
 #endif

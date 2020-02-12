@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -29,7 +29,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #ifndef INCLUDE_CAFFE_LAYERS_MLU_UNPOOLING_LAYER_HPP_
 #define INCLUDE_CAFFE_LAYERS_MLU_UNPOOLING_LAYER_HPP_
-
 #ifdef USE_MLU
 
 #include <vector>
@@ -43,6 +42,11 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 namespace caffe {
 
+/**
+ * @brief MLU acceleration of UnPoolingLayer
+ *        UnPoolingLayer UnPools the input image by assigning fixed,
+ *  bilinear interpolation,etc. within regions.
+ */
 template <typename Dtype>
 class MLUUnPoolingLayer : public UnPoolingLayer<Dtype> {
   public:
@@ -92,6 +96,5 @@ class MLUUnPoolingLayer : public UnPoolingLayer<Dtype> {
   Blob<Dtype>* mlu_mask_;
 };
 }  // namespace caffe
-
 #endif  // USE_MLU
 #endif  // INCLUDE_CAFFE_LAYERS_MLU_UNPOOLING_LAYER_HPP_

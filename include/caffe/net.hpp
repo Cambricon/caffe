@@ -2,7 +2,7 @@
 All modification made by Cambricon Corporation: © 2018--2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -80,14 +80,18 @@ class Net {
       NetParameter* const param_optimized);
 
   /**
+   * @brief Optimize ConvBnScale to improve MLU performance
+   */
+  void OptimizeConvBnScale(NetParameter param,
+      NetParameter* const param_optimized);
+
+  /**
    * @brief Generate MLU offline model.
    *
    * @param name indicates the model name. The model file is "name.mef",
    *        and an description file "name.desc" will be generated.
    */
-  void genOfflineModel(const std::string& name,
-                       hardwareReshape_t hardware_reshape,
-                       int model_parallel);
+  void genOfflineModel(const std::string& name);
 
 
   /**
@@ -99,9 +103,9 @@ class Net {
    *        hardware_reshape[in] specified reshape mode 0/1.
    *
    */
-  bool genOfflineModelToMem(void* buffer, uint64_t* buffer_size, uint64_t* model_size,
-                            hardwareReshape_t hardware_reshape,
-                            int model_parallel);
+  bool genOfflineModelToMem(void* buffer, uint64_t* buffer_size, uint64_t* model_size);
+
+  bool genOfflineModelToMem(void** buffer, uint64_t* model_size);
 #endif  // USE_MLU
 
   /**
@@ -202,8 +206,10 @@ class Net {
   void ToProto(NetParameter* param, bool write_diff = false) const;
   /// @brief Writes the net to an HDF5 file.
   void ToHDF5(const string& filename, bool write_diff = false) const;
-  void ToInt8Prototxt(map<string, Dtype>* max_value, string output_file,
-                      bool use_ini = false, bool write = false);
+  void ToquantizedPrototxt(map<string, Dtype>* max_value,
+      string output_file, string mode,
+      BaseDataType type, BaseDataType top_dtype,
+      bool use_ini = false, bool write = false);
 
   /// @brief returns the network name.
   inline const string& name() const { return name_; }
@@ -345,14 +351,18 @@ class Net {
 
 #ifdef USE_MLU
   // @breif offline net execute
-  void OfflineNetRun(const SegmentInfo& seg_info, const cnrtModel_t& model,
-                     const int data_parallel, const cnrtDataType_t& dtype);
+  void OfflineNetRun(const SegmentInfo& seg_info,
+                     const cnrtModel_t& model,
+                     const cnrtDataType_t& dtype,
+                     void** cpuData);
 
   // @breif destroy offline resource
   void OfflineDestroy();
 
   // @breif control if append cpu info into offlinemodel file
   inline void set_cpu_info_flag(bool flag) { set_cpu_info_ = flag; }
+  void RecalculateWeightsInt8Info(shared_ptr<Blob<Dtype>> weights_blob,
+    const LayerParameter& param);
 #endif
 
   protected:
@@ -396,9 +406,10 @@ class Net {
   void OfflineRunInit(const SegmentInfo& seg_info);
 
   // @brief mlu subnet execute
-  void OfflineMluSubnetRun(const cnrtModel_t& model, const int data_parallel,
+  void OfflineMluSubnetRun(const cnrtModel_t& model,
                            const cnrtDataType_t& dtype,
-                           const SegmentInfoUnit& unit_info);
+                           const SegmentInfoUnit& unit_info,
+                           void** cpuData);
 
   // @breif cpu subnet execute
   void OfflineCpuSubnetRun(const SegmentInfoUnit& unit_info);

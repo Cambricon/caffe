@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -114,6 +114,7 @@ class SyncedMemory {
   void set_mlu_data(void* data);
   void* mutable_mlu_data(const MLUTensorDesc& mlu_tensor_desc);
   const void* mlu_data(const MLUTensorDesc& mlu_tensor_desc);
+  void* mutable_sync_data(const MLUTensorDesc& mlu_tensor_desc);
 #endif
   enum SyncedHead { UNINITIALIZED, HEAD_AT_CPU, HEAD_AT_GPU, HEAD_AT_MLU, SYNCED };
   SyncedHead head() { return head_; }
@@ -135,8 +136,10 @@ class SyncedMemory {
 
 #ifdef USE_MLU
   void* mlu_ptr_;
+  void* sync_ptr_; // sync mlu data to cpu, mlu data format: float16, int8, uint8 etc
   void to_cpu(const MLUTensorDesc& mlu_tensor_desc);
   void to_mlu(const MLUTensorDesc& mlu_tensor_desc);
+  void to_sync(const MLUTensorDesc& mlu_tensor_desc);
 #endif
 
   bool own_cpu_data_;

@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -34,10 +34,12 @@ DEFINE_string(meanvalue, "",
     "If specified, can be one value or can be same as image channels"
     " - would subtract from the corresponding channel). Separated by ','."
     "Either meanfile or meanvalue should be provided, not both.");
-DEFINE_int32(dataparallel, 1, "dataparallel,dataparallel * mp should "
-                              "be lower than or equal to 32 ");
-DEFINE_int32(threads, 1, "threads,dataparallel * mp should "
+DEFINE_int32(threads, 1, "threads, should "
                          "be lower than or equal to 32 ");
+DEFINE_int32(channel_dup, 1, "Enable const memory auto channel duplication. "
+                         "Could improve performance when multithreading."
+                         "Works only with apiversion 3");
+DEFINE_int32(simple_compile, 1, "Use simple compile interface or not.");
 DEFINE_string(images, "", "input file list");
 DEFINE_string(labels, "", "label to name");
 DEFINE_string(labelmapfile, "",
@@ -56,3 +58,10 @@ DEFINE_int32(apiversion, 2, "specify the version of CNRT to run.");
 DEFINE_string(functype, "1H16",
     "Specify the core to run on the arm device."
     "Set the options to 1H16 or 1H8, the default is 1H16.");
+DEFINE_int32(Bangop, 0, "Use Bang Operator or not");
+DEFINE_int32(preprocess_option, 0, "Use it to choose Image preprocess:"
+    "0: image resize to input size,"
+    "1: center input size crop from resized image with shorter size = 256,"
+    "2: center input size crop from resized image into 256 x 256.");
+DEFINE_string(output_dtype, "INVALID",
+    "Specifies the type of output in the middle of the model.");

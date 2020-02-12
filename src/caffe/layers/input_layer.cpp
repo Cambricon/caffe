@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -42,10 +42,13 @@ void InputLayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& bottom,
   CHECK(num_shape == 0 || num_shape == 1 || num_shape == num_top)
       << "Must specify 'shape' once, once per top blob, or not at all: "
       << num_top << " tops vs. " << num_shape << " shapes.";
+  BaseDataType cpu_dtype = sizeof(Dtype) == 4 ? DT_FLOAT32 : DT_DOUBLE;
+  BaseDataType mlu_dtype = this->layer_param_.has_top_mlu_dtype() ?
+    this->layer_param_.top_mlu_dtype(): DT_FLOAT16;
   if (num_shape > 0) {
     for (int i = 0; i < num_top; ++i) {
       const int shape_index = (param.shape_size() == 1) ? 0 : i;
-      top[i]->Reshape(param.shape(shape_index));
+      top[i]->Reshape(param.shape(shape_index), cpu_dtype, mlu_dtype, CNML_TENSOR);
     }
   }
 }

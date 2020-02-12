@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -35,6 +35,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <utility>
 #include <vector>
 #include <iomanip>
+#include <functional>
 #include "cnrt.h" // NOLINT
 #include "glog/logging.h"
 #include "ssd_off_post.hpp"
@@ -49,28 +50,45 @@ template<typename Dtype, template <typename> class Qtype>
 void SsdOffPostProcessor<Dtype, Qtype>::runParallel() {
   OffRunner<Dtype, Qtype> * infr = static_cast<OffRunner<Dtype, Qtype>*>(this->runner_);
   setDeviceId(infr->deviceId());
-  cnrtSetCurrentChannel((cnrtChannelType_t)(this->threadId_ % 4));
 
   this->readLabels(&this->labelNameMap);
 
   outCpuPtrs_ = new(Dtype);
-  outCpuPtrs_[0] = new float[infr->outCount()];
+  outCpuPtrs_[0] = new float[infr->outCounts()[0]];
+  size_t outputSize = infr->outputSizeArray()[0];
+  syncCpuPtrs_ = new(Dtype);
+  syncCpuPtrs_[0] = new char[outputSize];
 
+  int TASK_NUM = SimpleInterface::thread_num;
+  std::vector<std::future<void>> futureVector;
   while (true) {
     Dtype* mluOutData = infr->popValidOutputData();
-    if (mluOutData == nullptr) break;  // no more work
+    if (mluOutData == nullptr) {
+      break;  // no more work
+    }
 
     Timer copyout;
-    CNRT_CHECK(cnrtMemcpyBatchByDescArray(outCpuPtrs_,
-                                          mluOutData,
-                                          infr->outDescs(),
-                                          1,
-                                          infr->dataParallel(),
-                                          CNRT_MEM_TRANS_DIR_DEV2HOST));
+    CNRT_CHECK(cnrtMemcpy(syncCpuPtrs_[0], mluOutData[0],
+                          infr->outputSizeArray()[0],
+                          CNRT_MEM_TRANS_DIR_DEV2HOST));
+    cnrtDataType_t cpuDtype = CNRT_FLOAT32;
+    cnrtDataType_t mluDtype = infr->mluOutputDtype()[0];
+    int dim_values[4] = {infr->outNum(), infr->outChannel(),
+                         infr->outHeight(), infr->outWidth()};
+    int dim_order[4] = {0, 3, 1, 2};
+    if (cpuDtype != mluDtype) {
+      CNRT_CHECK(cnrtTransOrderAndCast(syncCpuPtrs_[0], mluDtype,
+          outCpuPtrs_[0], cpuDtype,
+          nullptr, 4, dim_values, dim_order));
+    } else {
+      CNRT_CHECK(cnrtTransOrderAndCast(syncCpuPtrs_[0], mluDtype,
+          outCpuPtrs_[0], cpuDtype,
+          nullptr, 4, dim_values, dim_order));
+    }
     copyout.log("copyout time ...");
+    infr->pushFreeOutputData(mluOutData);
 
     Timer postProcess;
-    infr->pushFreeOutputData(mluOutData);
 
     vector<cv::Mat> imgs;
     vector<string> img_names;
@@ -78,11 +96,50 @@ void SsdOffPostProcessor<Dtype, Qtype>::runParallel() {
     vector<vector<vector<float> > > detections = getResults(&imgs, &img_names, &colors);
 
     Timer dumpTimer;
-    if (FLAGS_dump)
-      this->WriteVisualizeBBox_offline(imgs, detections,
-        FLAGS_confidencethreshold, colors, this->labelNameMap, img_names);
+    if (FLAGS_dump) {
+      const float threshold = FLAGS_confidencethreshold;
+      const int size = imgs.size();
+      if (TASK_NUM > size)
+        TASK_NUM = size;
+      const int delta = size / TASK_NUM;
+      int from = 0;
+      int to = delta;
+      for (int i = 0; i < TASK_NUM; i++) {
+        from = delta * i;
+        if (i == TASK_NUM - 1) {
+          to = size;
+        } else {
+          to = delta * (i + 1);
+        }
+
+        auto func = this->tp_->add([](const vector<cv::Mat>& imgs,
+                    const vector<vector<vector<float>>>& detections,
+                    const float threshold,
+                    const vector<cv::Scalar>& colors,
+                    const map<int, string>& labelNameMap,
+                    const vector<string>& img_names,
+                    const int& from,
+                    const int& to,
+                    SsdProcessor<Dtype, Qtype>* object) {
+          object->WriteVisualizeBBox(imgs,
+                    detections,
+                    threshold,
+                    colors,
+                    labelNameMap,
+                    img_names,
+                    from,
+                    to);
+        }, imgs, detections, threshold, colors,
+           this->labelNameMap, img_names, from, to, this);
+
+        futureVector.push_back(std::move(func));
+      }
+    }
     dumpTimer.log("dump out time ...");
     postProcess.log("post process time ...");
+  }
+  for (int i = 0; i < futureVector.size(); i++) {
+    futureVector[i].get();
   }
 }
 
@@ -94,19 +151,33 @@ void SsdOffPostProcessor<Dtype, Qtype>::runSerial() {
     this->readLabels(&this->labelNameMap);
 
     outCpuPtrs_ = new(Dtype);
-    outCpuPtrs_[0] = new float[infr->outCount()];
+    outCpuPtrs_[0] = new float[infr->outCounts()[0]];
+    size_t outputSize = infr->outputSizeArray()[0];
+    syncCpuPtrs_ = new (Dtype);
+    syncCpuPtrs_[0] = new char[outputSize];
 
     this->initSerialMode = true;
   }
 
   Dtype* mluOutData = infr->popValidOutputData();
 
-  CNRT_CHECK(cnrtMemcpyBatchByDescArray(outCpuPtrs_,
-                                        mluOutData,
-                                        infr->outDescs(),
-                                        1,
-                                        1,
-                                        CNRT_MEM_TRANS_DIR_DEV2HOST));
+  CNRT_CHECK(cnrtMemcpy(syncCpuPtrs_[0], mluOutData[0],
+                        infr->outputSizeArray()[0],
+                        CNRT_MEM_TRANS_DIR_DEV2HOST));
+  cnrtDataType_t cpuDtype = CNRT_FLOAT32;
+  cnrtDataType_t mluDtype = infr->mluOutputDtype()[0];
+  int dim_values[4] = {infr->outNum(), infr->outChannel(),
+                       infr->outHeight(), infr->outWidth()};
+  int dim_order[4] = {0, 3, 1, 2};
+  if (cpuDtype != mluDtype) {
+    CNRT_CHECK(cnrtTransOrderAndCast(syncCpuPtrs_[0], mluDtype,
+       outCpuPtrs_[0], cpuDtype,
+       nullptr, 4, dim_values, dim_order));
+  } else {
+    CNRT_CHECK(cnrtTransOrderAndCast(syncCpuPtrs_[0], mluDtype,
+       outCpuPtrs_[0], cpuDtype,
+       nullptr, 4, dim_values, dim_order));
+  }
 
   vector<cv::Mat> imgs;
   vector<string> img_names;
@@ -114,8 +185,9 @@ void SsdOffPostProcessor<Dtype, Qtype>::runSerial() {
   vector<vector<vector<float> > > detections = getResults(&imgs, &img_names, &colors);
 
   if (FLAGS_dump)
-    this->WriteVisualizeBBox_offline(imgs, detections, FLAGS_confidencethreshold,
-                                     colors, this->labelNameMap, img_names);
+    this->WriteVisualizeBBox(imgs, detections, FLAGS_confidencethreshold,
+                                     colors, this->labelNameMap,
+                                     img_names, 0, imgs.size());
 
   infr->pushFreeOutputData(mluOutData);
 }
@@ -127,25 +199,20 @@ vector<vector<vector<float> > > SsdOffPostProcessor<Dtype, Qtype>::getResults(
                                             vector<cv::Scalar> *colors) {
   OffRunner<Dtype, Qtype> * infr = static_cast<OffRunner<Dtype, Qtype>*>(this->runner_);
   float* data = reinterpret_cast<float*>(outCpuPtrs_[0]);
-  vector<vector<vector<float> > > detections(infr->n());
+  vector<vector<vector<float> > > detections;
 
-  for (int k = 0; k < infr->outCount() / infr->outWidth(); ++k) {
-    if (data[4] == 0) {
-      // the score(data[4]) must be 0 if invalid detection, so skip it.
-      data += infr->outWidth();
-      continue;
+  // BangOp implementation
+  int count = infr->outChannel();
+  for (int i = 0; i < infr->outNum(); i++) {
+    int output_num = data[i * count];
+    vector<vector<float>> batch_detection;
+    for (int k = 0; k < output_num; k++) {
+       int index = i * count + 64 + k * 7;
+       if (static_cast<int>(data[index]) != i) continue;
+       vector<float> single_detection(data + index, data + index + 7);
+       batch_detection.push_back(single_detection);
     }
-    int batch = k / infr->outChannel();
-    vector<float> detection(7, 0);
-    detection[0] = batch;
-    detection[1] = data[5];
-    detection[2] = data[4];
-    detection[3] = data[0];
-    detection[4] = data[1];
-    detection[5] = data[2];
-    detection[6] = data[3];
-    detections[batch].push_back(detection);
-    data += infr->outWidth();
+    detections.push_back(batch_detection);
   }
 
   auto&& origin_img = infr->popValidInputNames();

@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -238,7 +238,47 @@ TYPED_TEST(MLUBatchNormLayerTest, TestForward) {
   ERR_RATE(err_sum/sum);
   EVENT_TIME(layer.get_event_time());
 }
+TYPED_TEST(MLUBatchNormLayerTest, TestForwardwithbeta) {
+  typedef typename TypeParam::Dtype Dtype;
+  LayerParameter layer_param;
+  layer_param.set_phase(TEST);
+  BatchNormParameter* batchnorm_param = layer_param.mutable_batch_norm_param();
+  batchnorm_param->set_use_alpha_beta(true);
 
+  BatchNormLayer<Dtype> cpu_layer(layer_param);
+  cpu_layer.SetUp(this->blob_bottom_vec_, this->cpu_blob_top_vec_);
+  cpu_layer.Forward(this->blob_bottom_vec_, this->cpu_blob_top_vec_);
+
+  MLUBatchNormLayer<Dtype> layer(layer_param);
+  layer.SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
+  layer.Reshape_dispatch(this->blob_bottom_vec_, this->blob_top_vec_);
+  layer.Forward(this->blob_bottom_vec_, this->blob_top_vec_);
+
+  EXPECT_EQ(this->blob_top_->num(), this->cpu_blob_top_->num());
+  EXPECT_EQ(this->blob_top_->channels(), this->cpu_blob_top_->channels());
+  EXPECT_EQ(this->blob_top_->height(), this->cpu_blob_top_->height());
+  EXPECT_EQ(this->blob_top_->width(), this->cpu_blob_top_->width());
+
+  const Dtype* cpu_top_data = this->cpu_blob_top_->cpu_data();
+  const Dtype* top_data = this->blob_top_->cpu_data();
+
+  const Dtype precision = 0.01;
+  float err_sum = 0, sum = 0;
+  for (int i = 0; i < this->blob_top_->count(); i++) {
+    Dtype tolerence = cpu_top_data[i] * precision;
+    if (tolerence < 0) {
+      tolerence = -tolerence;
+    }
+    EXPECT_NEAR(top_data[i], cpu_top_data[i], tolerence);
+    err_sum += std::abs(top_data[i] - cpu_top_data[i]);
+    sum += std::abs(cpu_top_data[i]);
+  }
+  std::ostringstream stream;
+  stream << "bottom1:" << this->blob_bottom_->shape_string().c_str();
+  BOTTOM(stream);
+  ERR_RATE(err_sum/sum);
+  EVENT_TIME(layer.get_event_time());
+}
 template <typename TypeParam>
 class MFUSBatchNormLayerTest : public MFUSDeviceTest<TypeParam> {
   typedef typename TypeParam::Dtype Dtype;
@@ -318,7 +358,55 @@ TYPED_TEST(MFUSBatchNormLayerTest, TestForward) {
   ERR_RATE(err_sum/sum);
   EVENT_TIME(fuser.get_event_time());
 }
+TYPED_TEST(MFUSBatchNormLayerTest, TestForwardwithbeta) {
+  typedef typename TypeParam::Dtype Dtype;
+  LayerParameter layer_param;
+  layer_param.set_phase(TEST);
+  BatchNormParameter* batchnorm_param = layer_param.mutable_batch_norm_param();
+  batchnorm_param->set_use_alpha_beta(true);
 
+  BatchNormLayer<Dtype> cpu_layer(layer_param);
+  cpu_layer.SetUp(this->blob_bottom_vec_, this->cpu_blob_top_vec_);
+  cpu_layer.Forward(this->blob_bottom_vec_, this->cpu_blob_top_vec_);
+
+  MLUBatchNormLayer<Dtype> layer(layer_param);
+  layer.SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
+  ASSERT_TRUE(layer.mfus_supported());
+
+  MFusion<Dtype> fuser;
+  fuser.reset();
+  fuser.addInputs(this->blob_bottom_vec_);
+  fuser.addOutputs(this->blob_top_vec_);
+  layer.Reshape_dispatch(this->blob_bottom_vec_, this->blob_top_vec_);
+  layer.fuse(&fuser);
+  fuser.compile();
+  fuser.forward();
+
+  EXPECT_EQ(this->blob_top_->num(), this->cpu_blob_top_->num());
+  EXPECT_EQ(this->blob_top_->channels(), this->cpu_blob_top_->channels());
+  EXPECT_EQ(this->blob_top_->height(), this->cpu_blob_top_->height());
+  EXPECT_EQ(this->blob_top_->width(), this->cpu_blob_top_->width());
+
+  const Dtype* cpu_top_data = this->cpu_blob_top_->cpu_data();
+  const Dtype* top_data = this->blob_top_->cpu_data();
+
+  const Dtype precision = 0.01;
+  float err_sum = 0, sum = 0;
+  for (int i = 0; i < this->blob_top_->count(); i++) {
+    Dtype tolerence = cpu_top_data[i] * precision;
+    if (tolerence < 0) {
+      tolerence = -tolerence;
+    }
+    EXPECT_NEAR(top_data[i], cpu_top_data[i], tolerence);
+    err_sum += std::abs(top_data[i] - cpu_top_data[i]);
+    sum += std::abs(cpu_top_data[i]);
+  }
+  std::ostringstream stream;
+  stream << "bottom1:" << this->blob_bottom_->shape_string().c_str();
+  BOTTOM(stream);
+  ERR_RATE(err_sum/sum);
+  EVENT_TIME(fuser.get_event_time());
+}
 #endif
 
 }  // namespace caffe

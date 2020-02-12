@@ -2,7 +2,7 @@
 All modification made by Cambricon Corporation: © 2018--2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -34,10 +34,9 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 DEFINE_int32(mludevice, 0,
     "set using mlu device number, default: 0");
-DEFINE_string(functype, "1H16",
-    "Specify the core to run on the arm device."
-    "Set the options to 1H16 or 1H8, the default is 1H16.");
-
+DEFINE_int32(batchsize, -1, "Read images size every batch for inference");
+DEFINE_int32(core_number, 1, "The number of cores are used for inference");
+DEFINE_string(output_dtype, "FLOAT16", "output_dtype");
 
 void rand1(float* data, int length) {
   unsigned int seed = 1024;
@@ -106,9 +105,11 @@ int main(int argc, char** argv) {
   std::string mcore = argv[4];
   if ((mcore != std::string("MLU100")) &&
       (mcore != std::string("1H16")) &&
-      (mcore != std::string("1H8"))) {
+      (mcore != std::string("1H8")) &&
+      (mcore != std::string("MLU220")) &&
+      (mcore != std::string("MLU270"))) {
     LOG(ERROR) << "Unrecognized mcore option: " << mcore
-              << "Available options: MLU100, 1H16, 1H8.";
+              << "Available options: MLU100, 1H16, 1H8, MLU270，MLU220.";
     exit(1);
   }
 
@@ -118,10 +119,8 @@ int main(int argc, char** argv) {
     cnmlInit(0);
     caffe::Caffe::set_rt_core(argv[4]);
     caffe::Caffe::set_mlu_device(FLAGS_mludevice);
-    caffe::Caffe::set_functype(FLAGS_functype);
-    caffe::Caffe::setDataParallel(1);
-    caffe::Caffe::setModelParallel(1);
     caffe::Caffe::set_mode(caffe::Caffe::MLU);
+    caffe::Caffe::setTopDataType(FLAGS_output_dtype);
     if (mlu_option == 2) {
       caffe::Caffe::set_mode(caffe::Caffe::MFUS);
     }
@@ -129,6 +128,11 @@ int main(int argc, char** argv) {
   } else {
     LOG(INFO) << "Use CPU.";
     caffe::Caffe::set_mode(caffe::Caffe::CPU);
+  }
+  if (FLAGS_batchsize > 0) {
+    caffe::Caffe::setBatchsize(FLAGS_batchsize);
+    caffe::Caffe::setCoreNumber(FLAGS_core_number);
+    caffe::Caffe::setSimpleFlag(true);
   }
 #else
   LOG(INFO) << "Use CPU.";
@@ -187,6 +191,7 @@ int main(int argc, char** argv) {
     }
   }
 
+  delete net;
   release_resource(mlu_option);
   return 0;
 }

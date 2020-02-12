@@ -2,7 +2,7 @@
 All modification made by Cambricon Corporation: © 2018--2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -50,8 +50,17 @@ void ParseNetSsdConfParameter(const NetParameter& param,
     vector<int>* dropped_layers,
     string bottom_blob);
 void SetEmptyWeightsBias(LayerParameter* const layer);
+void UpdateConvWeights(LayerParameter* const layer,
+    const vector<vector<float>>& alphabeta);
 void HackInplaceBlobs(NetParameter* param);
 bool IsInt8Net(const NetParameter& param);
+vector<vector<float>> GetBnAlphaBeta(const LayerParameter& layer);
+vector<vector<float>> GetScaleAlphaBeta(const LayerParameter& layer);
+vector<vector<int>> GetConvBnScaleStruct(const NetParameter& param,
+        const NetParameter* param_without_weight = NULL);
+void DeleteOptimizedLayers(NetParameter param,
+    NetParameter* const param_optimized,
+    const vector<int>& layer_dropped);
 #endif
 int NetGetLayerIndexByTopName(const NetParameter& net_param, const string top);
 
@@ -62,10 +71,18 @@ bool UpgradeNetAsNeeded(const string& param_file, NetParameter* param);
 void ReadNetParamsFromTextFileOrDie(const string& param_file,
                                     NetParameter* param);
 void ReadNetParamsFromBinaryFileOrDie(const string& param_file,
-                                      NetParameter* param);
+                                      NetParameter* param,
+                                      int opt_level = 0,
+                                      const NetParameter* param_without_weights = NULL);
 void ReadNetParamsFromBinaryMemOrDie(void* buffer, int buffer_size, NetParameter* param);
 void ReadNetParamsFromTextMemOrDie(void* buffer, int buffer_size,
     NetParameter* param);
+
+#ifdef USE_MLU
+// If the value of use_global_stats_ isn't equal in Batch Norm layer bewteen prototxt
+// anad caffemodel, set equal value decided by prototxt file
+void UpdateUseGlobalStats(NetParameter* target_param, const NetParameter& source_param);
+#endif
 
 // Return true iff any layer contains parameters specified using
 // deprecated V0LayerParameter.
@@ -112,6 +129,8 @@ bool NetNeedsInputUpgrade(const NetParameter& net_param);
 
 // Perform all necessary transformations to upgrade input fields into layers.
 void UpgradeNetInput(NetParameter* net_param);
+
+void UpdateInputBlobDim(NetParameter* net_param);
 
 // Return true iff the Net contains batch norm layers with manual local LRs.
 bool NetNeedsBatchNormUpgrade(const NetParameter& net_param);

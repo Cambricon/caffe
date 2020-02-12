@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -32,7 +32,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <cfloat>
 #include <sstream>
 #include <vector>
-
 #include "caffe/layers/mlu_pooling_layer.hpp"
 #include "caffe/util/math_functions.hpp"
 
@@ -40,14 +39,14 @@ namespace caffe {
 
 template <typename Dtype>
 void MLUPoolingLayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& bottom,
-      const vector<Blob<Dtype>*>& top) {
+                                        const vector<Blob<Dtype>*>& top) {
   PoolingLayer<Dtype>::LayerSetUp(bottom, top);
   top_size_ = top.size();
 }
 
 template <typename Dtype>
 void MLUPoolingLayer<Dtype>::Reshape_tensor(const vector<Blob<Dtype>*>& bottom,
-      const vector<Blob<Dtype>*>& top) {
+                                            const vector<Blob<Dtype>*>& top) {
   CHECK_EQ(4, bottom[0]->num_axes()) << "Input must have 4 axes, "
     << "corresponding to (num, channels, height, width)";
   this->channels_ = bottom[0]->channels();
@@ -95,7 +94,7 @@ void MLUPoolingLayer<Dtype>::Reshape_tensor(const vector<Blob<Dtype>*>& bottom,
   }
 
   BaseDataType cpu_dtype = sizeof(Dtype) == 4 ? DT_FLOAT32 : DT_DOUBLE;
-  BaseDataType mlu_dtype = DT_FLOAT16;
+  BaseDataType mlu_dtype = bottom[0]->mlu_type();
   top[0]->Reshape(bottom[0]->num(), this->channels_, this->pooled_height_,
                   this->pooled_width_, cpu_dtype, mlu_dtype, CNML_TENSOR);
   if (top.size() > 1) {
@@ -115,17 +114,17 @@ void MLUPoolingLayer<Dtype>::MLUCreateOpBindData(
     const vector<Blob<Dtype>*>& top) {
   // add pad
   if (this->pad_h_ || this->pad_w_) {
-    MLU_CHECK(cnmlCreateAddPadOp4Param(&pool_addpad_op_param_,
-                                   this->pad_h_,
-                                   pad_down_,
-                                   this->pad_w_,
-                                   pad_right_,
-                                   0));
+    MLU_CHECK(cnmlCreateAddPadOpParam_V2(&pool_addpad_op_param_,
+                                          this->pad_h_,
+                                          pad_down_,
+                                          this->pad_w_,
+                                          pad_right_,
+                                          0));
 
     MLU_CHECK(cnmlCreateAddPadOp(&addpad_op_ptr_,
-                                pool_addpad_op_param_,
-                                bottom[0]->mlu_tensor(),
-                                addpad_.mlu_tensor()));
+                                  pool_addpad_op_param_,
+                                  bottom[0]->mlu_tensor(),
+                                  addpad_.mlu_tensor()));
   }
 
   // pool_mode
@@ -166,32 +165,32 @@ void MLUPoolingLayer<Dtype>::MLUCreateOpBindData(
 
   /* PoolOp */
   MLU_CHECK(cnmlCreatePoolOp(&pool_op_ptr_,
-      pool_param_ptr_,
-      addpad_op_ptr_? addpad_.mlu_tensor() : bottom[0]->mlu_tensor(),
-      top[0]->mlu_tensor()));
+                     pool_param_ptr_,
+                     addpad_op_ptr_? addpad_.mlu_tensor() : bottom[0]->mlu_tensor(),
+                     top[0]->mlu_tensor()));
 
   // MAX POOL layers can output an extra top blob for the index
   // The output of index can be used as the second input of upsample layer.
   if (top_size_ > 1) {
     pool_mode = CNML_POOL_MAXINDEX;
     MLU_CHECK(cnmlCreatePoolOpParam(&pool_index_param_ptr_,
-                                  this->kernel_h_,
-                                  this->kernel_w_,
-                                  this->stride_h_,
-                                  this->stride_w_,
-                                  0, /* origin pad_h ignored */
-                                  0, /* origin pad_w ignored */
-                                  0, /* dilation_h not set */
-                                  0, /* dilation_w not set */
-                                  pool_mode,
-                                  CNML_POOL_KVALID,
-                                  false));
+                                    this->kernel_h_,
+                                    this->kernel_w_,
+                                    this->stride_h_,
+                                    this->stride_w_,
+                                    0, /* origin pad_h ignored */
+                                    0, /* origin pad_w ignored */
+                                    0, /* dilation_h not set */
+                                    0, /* dilation_w not set */
+                                    pool_mode,
+                                    CNML_POOL_KVALID,
+                                    false));
 
     MLU_CHECK(cnmlCreatePoolOp(&pool_index_op_ptr_,
-                              pool_index_param_ptr_,
-                              addpad_op_ptr_? addpad_.mlu_tensor() :
-                              bottom[0]->mlu_tensor(),
-                              top[1]->mlu_tensor()));
+                                pool_index_param_ptr_,
+                                addpad_op_ptr_? addpad_.mlu_tensor() :
+                                bottom[0]->mlu_tensor(),
+                                top[1]->mlu_tensor()));
   }
 }
 
@@ -200,15 +199,15 @@ void MLUPoolingLayer<Dtype>::MLUCompileOp() {
   if (this->pad_h_ || this->pad_w_) {
     MLU_CHECK(cnmlCompileBaseOp(addpad_op_ptr_,
                                 Caffe::rt_core(),
-                                Caffe::model_parallel()));
+                                Caffe::core_number()));
   }
   MLU_CHECK(cnmlCompileBaseOp(pool_op_ptr_,
                               Caffe::rt_core(),
-                              Caffe::model_parallel()));
+                              Caffe::core_number()));
   if (top_size_ > 1) {
     MLU_CHECK(cnmlCompileBaseOp(pool_index_op_ptr_,
                                 Caffe::rt_core(),
-                                Caffe::model_parallel()));
+                                Caffe::core_number()));
   }
 }
 
@@ -217,24 +216,24 @@ void MLUPoolingLayer<Dtype>::Forward_mlu(const vector<Blob<Dtype>*>& bottom,
                                          const vector<Blob<Dtype>*>& top) {
   if ((this->pad_h_ || this->pad_w_) && addpad_op_ptr_) {
     MLU_CHECK(cnmlComputeAddPadOpForward_V3(addpad_op_ptr_,
-                                        bottom[0]->mutable_mlu_data(),
-                                        addpad_.mutable_mlu_data(),
-                                        Caffe::forward_param(),
-                                        Caffe::queue()));
+                                            bottom[0]->mutable_mlu_data(),
+                                            addpad_.mutable_mlu_data(),
+                                            Caffe::forward_param(),
+                                            Caffe::queue()));
   }
   auto pool_input = addpad_op_ptr_? addpad_.mutable_mlu_data() :
                                     bottom[0]->mutable_mlu_data();
   MLU_CHECK(cnmlComputePoolOpForward_V3(pool_op_ptr_,
-                                    pool_input,
-                                    top[0]->mutable_mlu_data(),
-                                    Caffe::forward_param(),
-                                    Caffe::queue()));
+                                        pool_input,
+                                        top[0]->mutable_mlu_data(),
+                                        Caffe::forward_param(),
+                                        Caffe::queue()));
   if (top_size_ > 1) {
     MLU_CHECK(cnmlComputePoolOpForward_V3(pool_index_op_ptr_,
-                                      pool_input,
-                                      top[1]->mutable_mlu_data(),
-                                      Caffe::forward_param(),
-                                      Caffe::queue()));
+                                          pool_input,
+                                          top[1]->mutable_mlu_data(),
+                                          Caffe::forward_param(),
+                                          Caffe::queue()));
   }
 }
 
@@ -280,5 +279,4 @@ void MLUPoolingLayer<Dtype>::MLUDestroyOp() {
 INSTANTIATE_CLASS(MLUPoolingLayer);
 
 }  // namespace caffe
-
 #endif  // USE_MLU

@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018--2019 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -40,6 +40,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "include/pipeline.hpp"
 #include "include/command_option.hpp"
 #include "include/common_functions.hpp"
+#include "include/simple_interface.hpp"
 
 using std::string;
 using std::vector;
@@ -52,7 +53,6 @@ void OnDataProvider<Dtype, Qtype>::runParallel() {
   setupConfig(this->threadId_, runner->deviceId(), runner->deviceSize());
 
   caffe::Net<Dtype>* netBuff =  runner->net();
-  // data_parallel has already been applied to count
   int inputCount = netBuff->input_blobs()[0]->count();
   inputCpuPtr_ = new Dtype[inputCount];
 
@@ -75,7 +75,9 @@ void OnDataProvider<Dtype, Qtype>::runParallel() {
     this->inImages_.clear();
     this->imageName_.clear();
     this->readOneBatch();
-    if (this->inImages_.empty()) break;
+    if (this->inImages_.empty()) {
+      break;
+    }
     vector<cv::Mat>& imgs = this->inImages_[0];
     vector<string>& imgNames  = this->imageName_[0];
 #endif
@@ -84,23 +86,66 @@ void OnDataProvider<Dtype, Qtype>::runParallel() {
     this->Preprocess(imgs, &preprocessedImages);
 
     auto inputBlob = netBuff->input_blobs()[0];
-    auto inputMluTensorPtr = inputBlob->mlu_tensor();
-    auto inputCpuTensorPtr = inputBlob->cpu_tensor();
     float* inputMluPtr = runner->popFreeInputData();
+    float* inputSyncPtr = runner->popFreeInputSyncData();
+    float* inputSyncTmpPtr = nullptr;
+    size_t input_size;
+    if (inputBlob->is_first_conv_input_blob()) {
+      inputSyncTmpPtr = runner->popFreeInputSyncTmpData();
+    }
     Timer timer;
-    cnmlMemcpyBatchTensorToDevice(inputCpuTensorPtr,
-                                  inputCpuPtr_,
-                                  inputMluTensorPtr,
-                                  inputMluPtr,
-                                  runner->dataParallel());
+    cnrtDataType_t cpuDtype = to_cnrt_dtype(inputBlob->cpu_type());
+    cnrtDataType_t mluDtype = to_cnrt_dtype(inputBlob->mlu_type());
+    int dim_values_cpu[4] = {inputBlob->shape()[0], inputBlob->shape()[1],
+                        inputBlob->shape()[2], inputBlob->shape()[3]};
+    int dim_values_mlu[4] = {inputBlob->mlu_shape()[0], inputBlob->mlu_shape()[1],
+                        inputBlob->mlu_shape()[2], inputBlob->mlu_shape()[3]};
+    int dim_order[4] = {0, 2, 3, 1}; // NCHW -> NHWC
+    if (mluDtype != cpuDtype) {
+      if (inputBlob->is_first_conv_input_blob()) {
+        int dim_strides[4] = {0, 0, 0, 1};
+        CNRT_CHECK(cnrtTransOrderAndCast(reinterpret_cast<void*>(inputCpuPtr_),
+                                         cpuDtype,
+                                         reinterpret_cast<void*>(inputSyncTmpPtr),
+                                         mluDtype,
+                                         nullptr,
+                                         inputBlob->shape().size(),
+                                         dim_values_cpu,
+                                         dim_order));
+        CNRT_CHECK(cnrtAddDataStride(reinterpret_cast<void*>(inputSyncTmpPtr), mluDtype,
+              reinterpret_cast<void*>(inputSyncPtr), inputBlob->shape().size(),
+              dim_values_mlu, dim_strides));
+      } else {
+        CNRT_CHECK(cnrtTransOrderAndCast(reinterpret_cast<void*>(inputCpuPtr_),
+                                         cpuDtype,
+                                         reinterpret_cast<void*>(inputSyncPtr),
+                                         mluDtype,
+                                         nullptr,
+                                         inputBlob->shape().size(),
+                                         dim_values_cpu,
+                                         dim_order));
+      }
+    } else {
+      CNRT_CHECK(cnrtTransDataOrder(reinterpret_cast<void*>(inputCpuPtr_),
+                                    mluDtype,
+                                    reinterpret_cast<void*>(inputSyncPtr),
+                                    inputBlob->shape().size(),
+                                    dim_values_cpu,
+                                    dim_order));
+    }
+    MLU_CHECK(cnmlGetTensorSize_V2(netBuff->input_blobs()[0]->mlu_tensor(), &input_size));
+    CNRT_CHECK(cnrtMemcpy(reinterpret_cast<void*>(inputMluPtr), inputSyncPtr,
+          input_size, CNRT_MEM_TRANS_DIR_HOST2DEV));
     timer.log("copy in time");
-    runner->pushValidInputData(inputMluPtr);
-    runner->pushValidInputNames(imgNames);
+    runner->pushValidInputDataAndNames(inputMluPtr, imgNames);
+    runner->pushValidInputSyncData(inputSyncPtr);
+    if (inputBlob->is_first_conv_input_blob()) {
+      runner->pushValidInputSyncTmpData(inputSyncTmpPtr);
+    }
   }
   LOG(INFO) << "DataProvider: no more data. Exit!";
 #endif
   // tell runner to exit
-  runner->pushValidInputData(nullptr);
 }
 
 template <typename Dtype, template <typename> class Qtype>
@@ -181,22 +226,14 @@ void setupConfig(int threadID, int deviceID, int deviceSize) {
 #ifdef USE_MLU
   caffe::Caffe::set_mlu_device(deviceID);
   caffe::Caffe::set_rt_core(FLAGS_mcore);
-  caffe::Caffe::set_functype(FLAGS_functype);
   caffe::Caffe::set_mode(FLAGS_mmode);
+  caffe::Caffe::setDetectOpMode(FLAGS_Bangop);
   caffe::Caffe::setReshapeMode(caffe::Caffe::ReshapeMode::SETUPONLY);
-  caffe::Caffe::setDataParallel(FLAGS_dataparallel);
-  caffe::Caffe::setModelParallel(FLAGS_modelparallel);
-  caffe::Caffe::setChannelId(threadID / deviceSize % 4);
-  stringstream ss(FLAGS_datastrategy);
-  vector<int> strategy;
-  string value;
-  while (getline(ss, value, ',')) {
-    strategy.push_back(std::atoi(value.c_str()));
-  }
-  CHECK(strategy.size() == 2) <<
-    "only support two values: input and output strategy";
-  if (strategy[0] != -1 || strategy[1] != -1) {
-    caffe::Caffe::setDataStrategy(strategy);
+  caffe::Caffe::setSimpleFlag(true);
+  caffe::Caffe::setBatchsize(FLAGS_batchsize);
+  caffe::Caffe::setCoreNumber(FLAGS_core_number);
+  if (FLAGS_output_dtype != "INVALID") {
+    caffe::Caffe::setTopDataType(FLAGS_output_dtype);
   }
 #endif
 }

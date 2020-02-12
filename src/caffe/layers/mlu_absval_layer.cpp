@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -43,7 +43,10 @@ void MLUAbsValLayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& bottom,
 template <typename Dtype>
 void MLUAbsValLayer<Dtype>::Reshape_tensor(const vector<Blob<Dtype>*>& bottom,
                                            const vector<Blob<Dtype>*>& top) {
+  BaseDataType cpu_dtype = sizeof(Dtype) == 4 ? DT_FLOAT32 : DT_DOUBLE;
+  BaseDataType mlu_dtype = bottom[0]->mlu_type();
   AbsValLayer<Dtype>::Reshape(bottom, top);
+  top[0]->Reshape(top[0]->shape(), cpu_dtype, mlu_dtype, CNML_TENSOR);
 }
 
 template <typename Dtype>
@@ -68,7 +71,7 @@ template <typename Dtype>
 void MLUAbsValLayer<Dtype>::MLUCompileOp() {
   MLU_CHECK(cnmlCompileBaseOp(absval_op_ptr_,
                               Caffe::rt_core(),
-                              Caffe::model_parallel()));
+                              Caffe::core_number()));
 }
 
 template <typename Dtype>
@@ -79,7 +82,7 @@ MLUAbsValLayer<Dtype>::~MLUAbsValLayer() {
 template <typename Dtype>
 void MLUAbsValLayer<Dtype>::Forward_mlu(const vector<Blob<Dtype>*>& bottom,
                                         const vector<Blob<Dtype>*>& top) {
-    MLU_CHECK(cnmlComputeActiveOpForward_V3(absval_op_ptr_,
+  MLU_CHECK(cnmlComputeActiveOpForward_V3(absval_op_ptr_,
                                         bottom[0]->mutable_mlu_data(),
                                         top[0]->mutable_mlu_data(),
                                         Caffe::forward_param(),

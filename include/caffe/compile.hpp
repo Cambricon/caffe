@@ -2,7 +2,7 @@
 All modification made by Cambricon Corporation: © 2018--2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -32,13 +32,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #ifdef USE_MLU
 #include <string>
 #include <vector>
-#include "cnml.h"
-
-typedef enum {
-  hardware_reshape_close = 1,
-  hardware_reshape_NCHW = 2,
-  hardware_reshape_NHWC = 3
-} hardwareReshape_t;
+#include "cnml.h"  // NOLINT
 
 namespace caffe {
 
@@ -50,17 +44,11 @@ namespace caffe {
  * @param buildpath target file path
  * @param buildType core version
  * @param hardwareReshape if true, use MLU to reshape data
- * @param model_parallel the number of cores used
  *
 */
 bool compile(int modelType, std::vector<std::string> *path,
       std::string *buildpath, cnmlCoreVersion_t buildType,
-      hardwareReshape_t hardwareReshape);
-
-bool compile(int modelType, std::vector<std::string> *path,
-      std::string *buildpath, cnmlCoreVersion_t buildType,
-      hardwareReshape_t hardwareReshape, int model_parallel);
-
+      std::string name);
 /**
  * brief Save offline model into a specific buffer.
  *
@@ -72,25 +60,15 @@ bool compile(int modelType, std::vector<std::string> *path,
  * @param modelsize The size of gennerated offline model
  * @param buildType core version
  * @param hardwareReshape if true, use MLU to reshape data
- * @param model_parallel the number of cores used
+ * @param name generated offline model name
  *
  */
   bool compile(int modelType, std::vector<uint8_t*> buffer,
               std::vector<uint32_t> buffersize,
               uint8_t* buildbuffer,
               uint32_t buildbuffersize,
-              uint32_t& modelsize,
-              cnmlCoreVersion_t buildType,
-              hardwareReshape_t hardwareReshape);
-
-  bool compile(int modelType, std::vector<uint8_t*> buffer,
-              std::vector<uint32_t> buffersize,
-              uint8_t* buildbuffer,
-              uint32_t buildbuffersize,
-              uint32_t& modelsize,
-              cnmlCoreVersion_t buildType,
-              hardwareReshape_t hardwareReshape,
-              int model_parallel);
+              uint32_t& modelsize,  //NOLINT
+              cnmlCoreVersion_t buildType);
 }  // namespace caffe
 #endif  // USE_MLU
 #endif  // INCLUDE_CAFFE_COMPILE_HPP_

@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -45,12 +45,17 @@ using std::thread;
 template <typename Dtype, template <typename> class Qtype>
 class Pipeline {
   public:
-  Pipeline(DataProvider<Dtype, Qtype> *provider, Runner<Dtype, Qtype> *runner,
+  Pipeline(DataProvider<Dtype, Qtype> *provider,
+           Runner<Dtype, Qtype> *runner,
+           PostProcessor<Dtype, Qtype> *postprocessor);
+  Pipeline(const vector<DataProvider<Dtype, Qtype>*>& providers,
+           Runner<Dtype, Qtype> *runner,
            PostProcessor<Dtype, Qtype> *postprocessor);
   ~Pipeline();
   void runParallel();
   void runSerial();
   inline DataProvider<Dtype, Qtype>* dataProvider() { return data_provider_; }
+  inline vector<DataProvider<Dtype, Qtype>*> dataProviders() { return data_providers_; }
   inline Runner<Dtype, Qtype>* runner() { return runner_; }
   inline PostProcessor<Dtype, Qtype>* postProcessor() { return postProcessor_; }
   static void notifyAll();
@@ -58,6 +63,7 @@ class Pipeline {
 
   private:
   DataProvider<Dtype, Qtype> *data_provider_;
+  vector<DataProvider<Dtype, Qtype>*> data_providers_;
   Runner<Dtype, Qtype> *runner_;
   PostProcessor<Dtype, Qtype>* postProcessor_;
 

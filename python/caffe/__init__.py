@@ -29,7 +29,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 """
 
 from .pycaffe import Net, SGDSolver, NesterovSolver, AdaGradSolver, RMSPropSolver, AdaDeltaSolver, AdamSolver, NCCL, Timer
-from ._caffe import init_log, log, set_mode_cpu, set_mode_gpu, set_mode_mlu, set_mode_mfus, set_rt_core, set_parallel, set_channel_id, set_device, Layer, get_solver, layer_type_list, set_random_seed, solver_count, set_solver_count, solver_rank, set_solver_rank, set_multiprocess, has_nccl, exit_mlu_lib
+'''from ._caffe import init_log, log, set_mode_cpu, set_mode_gpu, set_mode_mlu, set_mode_mfus, set_rt_core, set_parallel, set_channel_id, set_device, Layer, get_solver, layer_type_list, set_random_seed, solver_count, set_solver_count, solver_rank, set_solver_rank, set_multiprocess, has_nccl, exit_mlu_lib'''
+from ._caffe import init_log, log, set_mode_cpu, set_mode_gpu, set_mode_mlu, set_mode_mfus, set_rt_core, set_channel_id, set_device, Layer, get_solver, layer_type_list, set_random_seed, solver_count, set_solver_count, solver_rank, set_solver_rank, set_multiprocess, has_nccl, exit_mlu_lib, set_core_number, set_batch_size, set_simple_flag, set_bang_op
 from ._caffe import __version__
 from .proto.caffe_pb2 import TRAIN, TEST
 from .classifier import Classifier

@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -130,6 +130,78 @@ void DataProvider<Dtype, Qtype>::WrapInputLayer(vector<vector<cv::Mat> >* wrappe
 }
 
 template <typename Dtype, template <typename> class Qtype>
+cv::Mat DataProvider<Dtype, Qtype>::ResizeMethod(cv::Mat sample, int inputDim,
+    int mode) {
+  int left_x, top_y, new_h, new_w;
+  float img_w, img_h, img_scale;
+  cv::Mat sample_temp;
+  cv::Mat sample_temp_416;
+  cv::Mat sample_temp_bgr;
+  cv::Rect select;
+  switch (mode) {
+    case 0:  // resize source image into inputdim * inputdim
+      cv::resize(sample, sample_temp, cv::Size(inputDim, inputDim));
+      if (inGeometry_.width > inputDim || inGeometry_.height > inputDim) {
+        LOG(INFO) <<"input size overrange inputdim X inputdim, you can try again"
+                  << " by setting preprocess_option value to 0.";
+        exit(1);
+      }
+      left_x = inputDim / 2 - inGeometry_.width / 2;
+      top_y = inputDim / 2 - inGeometry_.height / 2;
+      break;
+    case 1:  // resize source image into inputdim * N, N is bigger than inputdim
+      img_w = sample.cols;
+      img_h = sample.rows;
+      img_scale = img_w < img_h ? (inputDim / img_w) : (inputDim / img_h);
+      new_w = std::round(img_w * img_scale);
+      new_h = std::round(img_h * img_scale);
+      cv::resize(sample, sample_temp, cv::Size(new_w, new_h));
+      if (inGeometry_.width > new_w || inGeometry_.height > new_h) {
+        LOG(INFO) <<"input size overrange inputdim X N, you can try again"
+                  << " by setting preprocess_option value to 0.";
+        exit(1);
+      }
+      left_x = new_w / 2 - inGeometry_.width / 2;
+      top_y = new_h / 2 - inGeometry_.height / 2;
+      break;
+    case 2:  // resize source image into inputdim * n, n is samller than inputdim
+      img_w = sample.cols;
+      img_h = sample.rows;
+      img_scale = img_w < img_h ? (inputDim / img_h) : (inputDim / img_w);
+      new_w = std::floor(img_w * img_scale);
+      new_h = std::floor(img_h * img_scale);
+      cv::resize(sample, sample_temp, cv::Size(new_w, new_h), CV_INTER_LINEAR);
+      if (inChannel_ == 3)
+        sample_temp_416 = cv::Mat(inGeometry_.height, inGeometry_.height,
+                                CV_8UC3, cv::Scalar(128, 128, 128));
+      if (inChannel_ == 4)
+        sample_temp_416 = cv::Mat(inGeometry_.height, inGeometry_.height,
+                                CV_8UC4, cv::Scalar(128, 128, 128, 128));
+      sample_temp.copyTo(sample_temp_416(
+                        cv::Range((static_cast<float>(inGeometry_.height) - new_h) / 2,
+                          (static_cast<float>(inGeometry_.height) - new_h) / 2 + new_h),
+                        cv::Range((static_cast<float>(inGeometry_.height) - new_w) / 2,
+                          (static_cast<float>(inGeometry_.height) - new_w) / 2 + new_w)));
+      //  BGR(A)->RGB(A)
+      if (inChannel_ == 3){
+        cv::cvtColor(sample_temp_416, sample_temp_bgr, cv::COLOR_BGR2RGB);
+        sample_temp_bgr.convertTo(sample_temp, CV_32FC3, 1);
+      }
+      if (inChannel_ == 4) {
+        cv::cvtColor(sample_temp_416, sample_temp_bgr, cv::COLOR_BGRA2RGBA);
+        sample_temp_bgr.convertTo(sample_temp, CV_32FC4, 1);
+      }
+      left_x = 0;
+      top_y = 0;
+      break;
+    default:
+      break;
+  }
+  select = cv::Rect(cv::Point(left_x, top_y), inGeometry_);
+  return sample_temp(select);
+}
+
+template <typename Dtype, template <typename> class Qtype>
 void DataProvider<Dtype, Qtype>::Preprocess(const vector<cv::Mat>& sourceImages,
     vector<vector<cv::Mat> >* destImages) {
   /* Convert the input image to the input image format of the network. */
@@ -151,18 +223,46 @@ void DataProvider<Dtype, Qtype>::Preprocess(const vector<cv::Mat>& sourceImages,
       cv::cvtColor(sourceImages[i], sample, cv::COLOR_BGRA2BGR);
     else if (sourceImages[i].channels() == 1 && inChannel_ == 3)
       cv::cvtColor(sourceImages[i], sample, cv::COLOR_GRAY2BGR);
+    else if (sourceImages[i].channels() == 3 && inChannel_ == 4)
+      cv::cvtColor(sourceImages[i], sample, cv::COLOR_BGR2BGRA);
+    else if (sourceImages[i].channels() == 1 && inChannel_ == 4)
+      cv::cvtColor(sourceImages[i], sample, cv::COLOR_GRAY2BGRA);
     else
       sample = sourceImages[i];
     cv::Mat sample_resized;
-    if (sample.size() != inGeometry_)
-      cv::resize(sample, sample_resized, inGeometry_);
-    else
+    if (sample.size() != inGeometry_) {
+      switch (FLAGS_preprocess_option) {
+        case 0:
+          cv::resize(sample, sample_resized, inGeometry_);
+          break;
+        case 1:  // 256 x N
+          sample_resized = ResizeMethod(sample, 256, 1);
+          break;
+        case 2:  // 256 x 256
+          sample_resized = ResizeMethod(sample, 256, 0);
+          break;
+        case 3:  // 320 x N for inception-v3
+          sample_resized = ResizeMethod(sample, 320, 1);
+          break;
+        case 4:  // n * 416 for yolov2
+          sample_resized = ResizeMethod(sample, 416, 2);
+          break;
+        default:
+          cv::resize(sample, sample_resized, inGeometry_);
+          break;
+      }
+    } else {
       sample_resized = sample;
+    }
+
     cv::Mat sample_float;
     if (this->inChannel_ == 3)
       sample_resized.convertTo(sample_float, CV_32FC3);
+    else if (this->inChannel_ == 4)
+      sample_resized.convertTo(sample_float, CV_32FC4);
     else
       sample_resized.convertTo(sample_float, CV_32FC1);
+
     cv::Mat sample_normalized;
     bool int8 = (FLAGS_int8 != -1) ? FLAGS_int8 : FLAGS_fix8;
     if (!int8 && (!meanFile_.empty() || !meanValue_.empty())) {

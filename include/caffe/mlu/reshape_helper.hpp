@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -43,7 +43,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 namespace caffe {
 
 /**
- * @brief ReshapeHelper reduces Reshape operation.
+ * @brief ReshapeHelper reduces Reshape operation which is heavy on MLU.
  */
 template <typename Dtype>
 class ReshapeHelper {
@@ -65,7 +65,7 @@ class ReshapeHelper {
   /**
    * For reshape and subnet, we don't support change mode after caffe init
    * since global status could be inconsistent for such scenarios.
-   * Put this at the begining of all non-constructor interfaces.
+   * XXX: put this at the begining of all non-constructor interfaces.
    */
   inline void modeCheck() {
     CHECK(init_caffe_mode_ == Caffe::mode())

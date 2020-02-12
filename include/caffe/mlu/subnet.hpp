@@ -2,7 +2,7 @@
 All modification made by Cambricon Corporation: © 2018--2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -87,14 +87,11 @@ class SubNet {
   void Backward();
 
   void fuseLayers();
-  void setHardwareReshape(hardwareReshape_t hard_reshape);
-  void setDataPreprocessStrategy();
 
   void addOffline(const cnmlModel_t& model, std::stringstream& ss,
                   int* off_index,
                   const unordered_map<Blob<Dtype>*, int>& blob2index,
-                  const unordered_map<Blob<Dtype>*, string>& blob2name,
-                  hardwareReshape_t hardware_reshape);
+                  const unordered_map<Blob<Dtype>*, string>& blob2name);
   vector<string> inputBlobNames(
       const unordered_map<Blob<Dtype>*, string>& blob2name);
   vector<string> outputBlobNames(
@@ -181,60 +178,6 @@ void SubNet<Dtype>::Reshape_mfus() {
 }
 
 template <typename Dtype>
-void SubNet<Dtype>::setHardwareReshape(hardwareReshape_t hardware_reshape) {
-  cnmlDataOrder_t order_type;
-  cnmlDataType_t data_type;
-  bool set_flag = false;
-  switch (hardware_reshape) {
-    case hardware_reshape_NCHW:
-      order_type = CNML_NCHW;
-      data_type = CNML_DATA_FLOAT32;
-      set_flag = true;
-      break;
-    case hardware_reshape_NHWC:
-      order_type = CNML_NHWC;
-      data_type = CNML_DATA_FLOAT32;
-      set_flag = true;
-      break;
-    case hardware_reshape_close:
-      break;
-  }
-  if (set_flag) {
-    for (auto blob : input_blobs_) {
-      cnmlEnableHardwareReshape(blob->mlu_tensor(), data_type, order_type);
-    }
-    for (auto blob : output_blobs_) {
-      cnmlEnableHardwareReshape(blob->mlu_tensor(), data_type, order_type);
-    }
-  }
-}
-template <typename Dtype>
-void SubNet<Dtype>::setDataPreprocessStrategy() {
-  if (Caffe::getInDataStrategy() != -1) {
-    for (auto blob : input_blobs_) {
-      blob->setCpuTensorOrder(Caffe::in_dataorder());
-      cnmlSetDataPreprocessStrategy(blob->mlu_tensor(),
-              blob->cpu_tensor(), Caffe::in_datastrategy());
-    }
-  }
-  if (Caffe::getOutDataStrategy() != -1) {
-    for (auto blob : output_blobs_) {
-      blob->setCpuTensorOrder(Caffe::out_dataorder());
-      cnmlSetDataPreprocessStrategy(blob->mlu_tensor(),
-              blob->cpu_tensor(), Caffe::out_datastrategy());
-    }
-  }
-  for (auto i : layers_index_) {
-    if (net_->layers(i)->externalOutput() &&
-          net_->layers(i)->layer_param().type() == "MLUYUVtoRGB") {
-      auto blob = net_->top_vecs()[i][0];
-      cnmlSetDataPreprocessStrategy(blob->mlu_tensor(),
-                                    blob->cpu_tensor(), CNML_NO_PREPROCESS);
-    }
-  }
-}
-
-template <typename Dtype>
 void SubNet<Dtype>::Forward(int start, int end) {
   CHECK(Caffe::mode() == Caffe::MFUS);
   CHECK_NE(layers_index_.size(), 0);
@@ -265,7 +208,6 @@ void SubNet<Dtype>::Forward_cpu() {
 template <typename Dtype>
 void SubNet<Dtype>::Forward_mfus() {
   CHECK(Caffe::mode() == Caffe::MFUS);
-  setDataPreprocessStrategy();
   fuseLayers();
   fuse_.compile();
   fuse_.forward();
@@ -275,8 +217,7 @@ template <typename Dtype>
 void SubNet<Dtype>::addOffline(
     const cnmlModel_t& model, std::stringstream& ss, int* off_index,
     const unordered_map<Blob<Dtype>*, int>& blob2index,
-    const unordered_map<Blob<Dtype>*, string>& blob2name,
-    hardwareReshape_t hardware_reshape) {
+    const unordered_map<Blob<Dtype>*, string>& blob2name) {
   CHECK(Caffe::mode() == Caffe::MFUS);
   if (!mfus_supported_) {
     ss << "[On CPU] " << contents_ << std::endl;
@@ -286,8 +227,6 @@ void SubNet<Dtype>::addOffline(
   func_name << "subnet" << *off_index;
   fuseLayers();
 
-  setDataPreprocessStrategy();
-  setHardwareReshape(hardware_reshape);
   fuse_.sortIO(blob2index);
   fuse_.compile();
   MLU_CHECK(cnmlAddFusionOpToModel(model, fuse_.op(), func_name.str().c_str()));
