@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -38,11 +38,13 @@ class ClassOffPostProcessor: public ClassPostProcessor<Dtype, Qtype> {
   ~ClassOffPostProcessor() {
     delete [] reinterpret_cast<float*>(outCpuPtrs_[0]);
     delete outCpuPtrs_;
+    free(syncCpuPtrs_);
   }
   virtual void runParallel() {}
   virtual void runSerial();
 
   private:
   Dtype* outCpuPtrs_;
+  void* syncCpuPtrs_;
 };
 #endif  // EXAMPLES_CLAS_OFFLINE_SINGLECORE_POST_PROCESS_CLAS_OFF_POST_HPP_

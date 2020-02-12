@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -47,15 +47,14 @@ template <typename Dtype>
 void MLUEXPLayer<Dtype>::Reshape_tensor(const vector<Blob<Dtype>*>& bottom,
                                         const vector<Blob<Dtype>*>& top) {
   BaseDataType cpu_dtype = sizeof(Dtype) == 4 ? DT_FLOAT32 : DT_DOUBLE;
-  BaseDataType mlu_dtype = DT_FLOAT16;
+  BaseDataType mlu_dtype = bottom[0]->mlu_type();
   top[0]->Reshape(bottom[0]->shape(), cpu_dtype, mlu_dtype, CNML_TENSOR);
   scale_blob_.Reshape(bottom[0]->shape(), cpu_dtype, mlu_dtype, CNML_TENSOR);
 
   // alpha: 1*c*1*1, beta: 1*1*1*1
-  vector<int> param_shape;
-  param_shape.push_back(1);
+  vector<int> param_shape(4, 1);
   beta_blob_.Reshape(param_shape, cpu_dtype, mlu_dtype, CNML_CONST);
-  param_shape.push_back(bottom[0]->channels());
+  param_shape[1] = bottom[0]->channels();
   alpha_blob_.Reshape(param_shape, cpu_dtype, mlu_dtype, CNML_CONST);
 }
 
@@ -83,12 +82,12 @@ void MLUEXPLayer<Dtype>::MLUCreateOpBindData(const vector<Blob<Dtype>*>& bottom,
                               alpha_blob_.mlu_tensor(),
                               beta_blob_.mlu_tensor()));
 
-  MLU_CHECK(cnmlBindConstData(alpha_blob_.mlu_tensor(),
-                              alpha_blob_.cpu_tensor(),
-                              alpha_blob_.mutable_cpu_data()));
-  MLU_CHECK(cnmlBindConstData(beta_blob_.mlu_tensor(),
-                              beta_blob_.cpu_tensor(),
-                              beta_blob_.mutable_cpu_data()));
+  MLU_CHECK(cnmlBindConstData_V2(alpha_blob_.mlu_tensor(),
+                              alpha_blob_.sync_data(),
+                              false));
+  MLU_CHECK(cnmlBindConstData_V2(beta_blob_.mlu_tensor(),
+                              beta_blob_.sync_data(),
+                              false));
 
   /* ExpOp: */
   MLU_CHECK(cnmlCreateExpOp(&exp_op_ptr_,
@@ -100,10 +99,10 @@ template <typename Dtype>
 void MLUEXPLayer<Dtype>::MLUCompileOp() {
   MLU_CHECK(cnmlCompileBaseOp(scale_op_ptr_,
                               Caffe::rt_core(),
-                              Caffe::model_parallel()));
+                              Caffe::core_number()));
   MLU_CHECK(cnmlCompileBaseOp(exp_op_ptr_,
                               Caffe::rt_core(),
-                              Caffe::model_parallel()));
+                              Caffe::core_number()));
 }
 
 

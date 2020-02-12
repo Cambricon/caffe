@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -264,7 +264,7 @@ TYPED_TEST(MLULogLayerTest, ForwardLog) {
     err_sum += std::abs(top_data[i] - expected_data[i]);
     sum += std::abs(top_data[i]);
   }
-  EXPECT_LE(err_sum / sum, 4e-3);
+  EXPECT_LE(err_sum / sum, 5e-3);
   std::ostringstream stream, param;
   param << "scale:" << log_param->scale() << "\t"
         << "shift:" << log_param->shift();

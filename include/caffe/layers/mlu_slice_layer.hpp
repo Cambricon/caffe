@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -32,7 +32,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #ifdef USE_MLU
 
 #include <vector>
-
 #include "caffe/blob.hpp"
 #include "caffe/layer.hpp"
 #include "caffe/proto/caffe.pb.h"
@@ -42,16 +41,15 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 namespace caffe {
 
 /**
- * @brief This layer takes a Blob and slices it along either the num or channel dimension,
+ * @brief MLU acceleration of SliceLayer
+ *        This layer takes a Blob and slices it along either the num or channel dimension,
  * outputting multiple sliced Blob results.
- *
  */
 template <typename Dtype>
 class MLUSliceLayer : public SliceLayer<Dtype> {
   public:
   explicit MLUSliceLayer(const LayerParameter& param)
-      : SliceLayer<Dtype>(param),
-        slice_param_ptr_(nullptr), slice_op_ptr_(nullptr) {}
+      : SliceLayer<Dtype>(param), slice_op_ptr_(nullptr) {}
 
   virtual void LayerSetUp(const vector<Blob<Dtype>*>& bottom,
                           const vector<Blob<Dtype>*>& top);
@@ -71,13 +69,11 @@ class MLUSliceLayer : public SliceLayer<Dtype> {
   void MLUCompileOp() {
     MLU_CHECK(cnmlCompileBaseOp(slice_op_ptr_,
                                 Caffe::rt_core(),
-                                Caffe::model_parallel()));
+                                Caffe::core_number()));
   }
 
-  cnmlSplitOpParam_t slice_param_ptr_;
   cnmlBaseOp_t slice_op_ptr_;
 };
 }  // namespace caffe
-
 #endif  // USE_MLU
 #endif  // INCLUDE_CAFFE_LAYERS_MLU_SLICE_LAYER_HPP_

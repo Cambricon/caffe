@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -31,21 +31,25 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define INCLUDE_CAFFE_LAYERS_MLU_ABSVAL_LAYER_HPP_
 
 #ifdef USE_MLU
-
 #include <vector>
-
 #include "caffe/blob.hpp"
 #include "caffe/layer.hpp"
 #include "caffe/proto/caffe.pb.h"
-
 #include "caffe/layers/absval_layer.hpp"
 #include "caffe/layers/neuron_layer.hpp"
 
 namespace caffe {
 
 /**
- * @brief compute element-wise abs
- *        top data[i] = | bottom data[i] |
+ * @brief MLU acceleration of AbsValLayer
+ *        AbsValLayer Computes @f$ y = |x| @f$
+ *
+ * @param bottom input Blob vector (length 1)
+ *   -# @f$ (N \times C \times H \times W) @f$
+ *      the inputs @f$ x @f$
+ * @param top output Blob vector (length 1)
+ *   -# @f$ (N \times C \times H \times W) @f$
+ *      the computed outputs @f$ y = |x| @f$
  */
 
 template <typename Dtype>

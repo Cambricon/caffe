@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -30,7 +30,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #ifdef USE_MLU
 #include <memory>
 #include <vector>
-
 #include "caffe/filler.hpp"
 #include "caffe/layers/mlu_prelu_layer.hpp"
 
@@ -38,7 +37,7 @@ namespace caffe {
 
 template <typename Dtype>
 void MLUPReLULayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& bottom,
-      const vector<Blob<Dtype>*>& top) {
+                                      const vector<Blob<Dtype>*>& top) {
   CHECK_GE(bottom[0]->num_axes(), 2)
       << "Number of axes of bottom blob must be >=2.";
   PReLUParameter prelu_param = this->layer_param().prelu_param();
@@ -90,10 +89,9 @@ void MLUPReLULayer<Dtype>::Reshape_tensor(const vector<Blob<Dtype>*>& bottom,
   CHECK_GE(bottom[0]->num_axes(), 2)
       << "Number of axes of bottom blob must be >=2.";
   BaseDataType cpu_dtype = sizeof(Dtype) == 4 ? DT_FLOAT32 : DT_DOUBLE;
-  BaseDataType mlu_dtype = DT_FLOAT16;
+  BaseDataType mlu_dtype = bottom[0]->mlu_type();
   top[0]->Reshape(bottom[0]->shape(), cpu_dtype, mlu_dtype, CNML_TENSOR);
 }
-
 
 template <typename Dtype>
 void MLUPReLULayer<Dtype>::MLUCreateOpBindData(
@@ -104,25 +102,25 @@ void MLUPReLULayer<Dtype>::MLUCreateOpBindData(
                               bottom[0]->mlu_tensor(),
                               top[0]->mlu_tensor(),
                               this->blobs_[0]->mlu_tensor()));
-  MLU_CHECK(cnmlBindConstData(this->blobs_[0]->mlu_tensor(),
-                              this->blobs_[0]->cpu_tensor(),
-            reinterpret_cast<float*>(this->blobs_[0]->mutable_cpu_data())));
+  MLU_CHECK(cnmlBindConstData_V2(this->blobs_[0]->mlu_tensor(),
+            reinterpret_cast<float*>(this->blobs_[0]->sync_data()),
+            false));
 }
 
 template <typename Dtype>
 void MLUPReLULayer<Dtype>::MLUCompileOp() {
   MLU_CHECK(cnmlCompileBaseOp(prelu_op_ptr_,
                               Caffe::rt_core(),
-                              Caffe::model_parallel()));
+                              Caffe::core_number()));
 }
 
 template <typename Dtype>
 void MLUPReLULayer<Dtype>::Forward_mlu(const vector<Blob<Dtype>*>& bottom,
-    const vector<Blob<Dtype>*>& top) {
+                                       const vector<Blob<Dtype>*>& top) {
   MLU_CHECK(cnmlComputePreluOpForward_V3(prelu_op_ptr_,
-            bottom[0]->mutable_mlu_data(),
-            top[0]->mutable_mlu_data(),
-            Caffe::forward_param(), Caffe::queue()));
+                                         bottom[0]->mutable_mlu_data(),
+                                         top[0]->mutable_mlu_data(),
+                                         Caffe::forward_param(), Caffe::queue()));
 }
 
 template <typename Dtype>

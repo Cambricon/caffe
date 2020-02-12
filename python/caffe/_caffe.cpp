@@ -87,6 +87,7 @@ void set_mode_mlu() {
   cnmlInit(0);
   Caffe::set_mlu_device(0);
   Caffe::set_mode(Caffe::MLU);
+  Caffe::setReshapeMode(Caffe::ReshapeMode::SETUPONLY);
 }
 void set_mode_mfus() {
   cnmlInit(0);
@@ -102,8 +103,12 @@ void exit_mlu_lib() {
   LOG(INFO) << "after cnmlExit()";
 }
 void set_rt_core(const string& v) { Caffe::set_rt_core(v); }
-void set_parallel(int count) { Caffe::setDataParallel(count); }
 void set_channel_id(int id) { Caffe::setChannelId(id); }
+void set_batch_size(uint16_t basz) { Caffe::setBatchsize(basz); }
+void set_bang_op(int op) { Caffe::setDetectOpMode(op); }
+void set_core_number(int coren) { Caffe::setCoreNumber(coren); }
+void set_simple_flag(bool flg) { Caffe::setSimpleFlag(flg); }
+
 #endif
 void InitLog() {
   ::google::InitGoogleLogging("");
@@ -445,9 +450,12 @@ BOOST_PYTHON_MODULE(_caffe) {
   bp::def("set_mode_mlu", &set_mode_mlu);
   bp::def("set_mode_mfus", &set_mode_mfus);
   bp::def("set_rt_core", &set_rt_core);
-  bp::def("set_parallel", &set_parallel);
+  bp::def("set_bang_op", &set_bang_op);
   bp::def("set_channel_id", &set_channel_id);
   bp::def("exit_mlu_lib", &exit_mlu_lib);
+  bp::def("set_batch_size", &set_batch_size);
+  bp::def("set_core_number", &set_core_number);
+  bp::def("set_simple_flag", &set_simple_flag);
 #endif
   bp::def("set_random_seed", &set_random_seed);
   bp::def("set_device", &Caffe::SetDevice);

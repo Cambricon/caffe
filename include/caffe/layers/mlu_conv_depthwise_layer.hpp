@@ -2,7 +2,7 @@
 All modification made by Cambricon Corporation: © 2018--2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -30,16 +30,25 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #ifndef INCLUDE_CAFFE_LAYERS_MLU_CONV_DEPTHWISE_LAYER_HPP_
 #define INCLUDE_CAFFE_LAYERS_MLU_CONV_DEPTHWISE_LAYER_HPP_
 #ifdef USE_MLU
-
 #include <vector>
-
 #include "caffe/blob.hpp"
 #include "caffe/layer.hpp"
 #include "caffe/proto/caffe.pb.h"
-
 #include "caffe/layers/conv_depthwise_layer.hpp"
 
 namespace caffe {
+
+/**
+ * @brief MLU acceleration of ConvolutionDepthwiseLayer
+ * Convdepthwise is a specifial type of convolution. When a convolution layer
+ * is a depthwise one if it matches below criteira:
+ * group is greater than 1
+ * Channels of bottom 0 equals group_
+ * n_output divides group
+ *
+ * This layer is a special case of ConvolutionLayer and MLUConvolutionLayer.
+ * Refer to those two layers for more details.
+*/
 
 template <typename Dtype>
 class MLUConvolutionDepthwiseLayer : public ConvolutionDepthwiseLayer<Dtype> {

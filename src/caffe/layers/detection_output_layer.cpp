@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -28,7 +28,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
 #include <algorithm>
-#include <fstream>  // NOLINT(readability/streams)
+#include <fstream>
 #include <map>
 #include <string>
 #include <utility>
@@ -408,6 +408,7 @@ void DetectionOutputLayer<Dtype>::Forward_cpu(
             delete outfiles[label_name];
           }
         } else if (output_format_ == "COCO") {
+#if not defined CROSS_COMPILE && not defined CROSS_COMPILE_ARM64
           boost::filesystem::path output_directory(output_directory_);
           boost::filesystem::path file(output_name_prefix_ + ".json");
           boost::filesystem::path out_file = output_directory / file;
@@ -421,6 +422,9 @@ void DetectionOutputLayer<Dtype>::Forward_cpu(
           std::string rv = boost::regex_replace(ss.str(), exp, "$1");
           outfile << rv.substr(rv.find("["), rv.rfind("]") - rv.find("["))
               << std::endl << "]" << std::endl;
+#else
+          LOG(FATAL) << "Output types are not supported.";
+#endif
         } else if (output_format_ == "ILSVRC") {
           boost::filesystem::path output_directory(output_directory_);
           boost::filesystem::path file(output_name_prefix_ + ".txt");

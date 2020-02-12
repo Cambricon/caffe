@@ -223,8 +223,8 @@ TYPED_TEST(MLUSoftmaxLayerTest, TestForward) {
         for (int j = 0; j < this->blob_top_->channels(); ++j) {
           sum += this->blob_top_->data_at(i, j, k, l);
         }
-        EXPECT_GE(sum, 0.998);
-        EXPECT_LE(sum, 1.002);
+        EXPECT_GE(sum, 0.995);
+        EXPECT_LE(sum, 1.005);
         // Test exact values
         Dtype scale = 0;
         for (int j = 0; j < this->blob_bottom_->channels(); ++j) {
@@ -297,8 +297,8 @@ TYPED_TEST(MFUSSoftmaxLayerTest, TestForward) {
         for (int j = 0; j < this->blob_top_->channels(); ++j) {
           sum += this->blob_top_->data_at(i, j, k, l);
         }
-        EXPECT_GE(sum, 0.998);
-        EXPECT_LE(sum, 1.002);
+        EXPECT_GE(sum, 0.995);
+        EXPECT_LE(sum, 1.005);
         // Test exact values
         Dtype scale = 0;
         for (int j = 0; j < this->blob_bottom_->channels(); ++j) {

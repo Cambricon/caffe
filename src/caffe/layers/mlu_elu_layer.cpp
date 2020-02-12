@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -29,14 +29,13 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #ifdef USE_MLU
 #include <vector>
-
 #include "caffe/layers/mlu_elu_layer.hpp"
 
 namespace caffe {
 
 template <typename Dtype>
 void MLUELULayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& bottom,
-      const vector<Blob<Dtype>*>& top) {
+                                    const vector<Blob<Dtype>*>& top) {
   ELULayer<Dtype>::LayerSetUp(bottom, top);
   alpha = this->layer_param_.elu_param().alpha();
 }
@@ -45,7 +44,7 @@ template <typename Dtype>
 void MLUELULayer<Dtype>::Reshape_tensor(const vector<Blob<Dtype>*>& bottom,
                                         const vector<Blob<Dtype>*>& top) {
   BaseDataType cpu_dtype = sizeof(Dtype) == 4 ? DT_FLOAT32 : DT_DOUBLE;
-  BaseDataType mlu_dtype = DT_FLOAT16;
+  BaseDataType mlu_dtype = bottom[0]->mlu_type();
 
   top[0]->Reshape(bottom[0]->shape(), cpu_dtype, mlu_dtype, CNML_TENSOR);
   relu_tensor_.Reshape(bottom[0]->shape(), cpu_dtype, mlu_dtype, CNML_TENSOR);
@@ -53,9 +52,8 @@ void MLUELULayer<Dtype>::Reshape_tensor(const vector<Blob<Dtype>*>& bottom,
   exp_tensor_.Reshape(bottom[0]->shape(), cpu_dtype, mlu_dtype, CNML_TENSOR);
   scale_tensor_.Reshape(bottom[0]->shape(), cpu_dtype, mlu_dtype, CNML_TENSOR);
 
-  vector<int> param_shape;
-  param_shape.push_back(1);
-  param_shape.push_back(bottom[0]->channels());
+  vector<int> param_shape(4, 1);
+  param_shape[1] = bottom[0]->channels();
   alpha_tensor_.Reshape(param_shape, cpu_dtype, mlu_dtype, CNML_CONST);
   beta_tensor_.Reshape(param_shape, cpu_dtype, mlu_dtype, CNML_CONST);
 }
@@ -75,7 +73,6 @@ void MLUELULayer<Dtype>::MLUCreateOpBindData(const vector<Blob<Dtype>*>& bottom,
                                 cnmlActiveFunction_t::CNML_ACTIVE_RELU,
                                 bottom[0]->mlu_tensor(),
                                 relu_tensor_.mlu_tensor()));
-
     /* SubOp: min(x, 0) */
     MLU_CHECK(cnmlCreateSubOp(&sub_op_ptr_,
                               bottom[0]->mlu_tensor(),
@@ -97,12 +94,13 @@ void MLUELULayer<Dtype>::MLUCreateOpBindData(const vector<Blob<Dtype>*>& bottom,
                                 alpha_tensor_.mlu_tensor(),
                                 beta_tensor_.mlu_tensor()));
 
-    MLU_CHECK(cnmlBindConstData(alpha_tensor_.mlu_tensor(),
-                                alpha_tensor_.cpu_tensor(),
-                                alpha_tensor_.mutable_cpu_data()));
-    MLU_CHECK(cnmlBindConstData(beta_tensor_.mlu_tensor(),
-                                beta_tensor_.cpu_tensor(),
-                                beta_tensor_.mutable_cpu_data()));
+    MLU_CHECK(cnmlBindConstData_V2(alpha_tensor_.mlu_tensor(),
+                                   alpha_tensor_.sync_data(),
+                                   false));
+
+    MLU_CHECK(cnmlBindConstData_V2(beta_tensor_.mlu_tensor(),
+                                   beta_tensor_.sync_data(),
+                                   false));
 
     /* AddOp: f(x) = max(x,0) + alpha * (exp(min(x, 0)) - 1) */
     MLU_CHECK(cnmlCreateAddOp(&add_op_ptr_,
@@ -117,29 +115,29 @@ void MLUELULayer<Dtype>::MLUCompileOp() {
   if (alpha == Dtype(0.0)) {
     MLU_CHECK(cnmlCompileBaseOp(relu_active_op_ptr_,
                                 Caffe::rt_core(),
-                                Caffe::model_parallel()));
+                                Caffe::core_number()));
   } else {
     MLU_CHECK(cnmlCompileBaseOp(relu_active_op_ptr_,
                                 Caffe::rt_core(),
-                                Caffe::model_parallel()));
+                                Caffe::core_number()));
     MLU_CHECK(cnmlCompileBaseOp(sub_op_ptr_,
                                 Caffe::rt_core(),
-                                Caffe::model_parallel()));
+                                Caffe::core_number()));
     MLU_CHECK(cnmlCompileBaseOp(exp_op_ptr_,
                                 Caffe::rt_core(),
-                                Caffe::model_parallel()));
+                                Caffe::core_number()));
     MLU_CHECK(cnmlCompileBaseOp(scale_op_ptr_,
                                 Caffe::rt_core(),
-                                Caffe::model_parallel()));
+                                Caffe::core_number()));
     MLU_CHECK(cnmlCompileBaseOp(add_op_ptr_,
                                 Caffe::rt_core(),
-                                Caffe::model_parallel()));
+                                Caffe::core_number()));
   }
 }
 
 template <typename Dtype>
 void MLUELULayer<Dtype>::Forward_mlu(const vector<Blob<Dtype>*>& bottom,
-    const vector<Blob<Dtype>*>& top) {
+                                     const vector<Blob<Dtype>*>& top) {
   if (alpha == Dtype(0.0)) {
     MLU_CHECK(cnmlComputeActiveOpForward_V3(relu_active_op_ptr_,
                                 bottom[0]->mutable_mlu_data(),

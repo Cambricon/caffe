@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -30,6 +30,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #ifdef USE_MLU
 #include <vector>
 #include "caffe/layers/mlu_power_layer.hpp"
+
 namespace caffe {
 
 template <typename Dtype>
@@ -45,7 +46,7 @@ template <typename Dtype>
 void MLUPowerLayer<Dtype>::Reshape_tensor(const vector<Blob<Dtype>*>& bottom,
                                           const vector<Blob<Dtype>*>& top) {
   BaseDataType cpu_dtype = sizeof(Dtype) == 4 ? DT_FLOAT32:DT_DOUBLE;
-  BaseDataType mlu_dtype = DT_FLOAT16;
+  BaseDataType mlu_dtype = bottom[0]->mlu_type();
   top[0]->Reshape(bottom[0]->shape(), cpu_dtype, mlu_dtype, CNML_TENSOR);
   this->temp_->Reshape(bottom[0]->shape(), cpu_dtype, mlu_dtype, CNML_TENSOR);
 }
@@ -105,12 +106,12 @@ void MLUPowerLayer<Dtype>::MLUCreateOpBindData(
                               : this->temp_->mlu_tensor(),
                               this->alpha_->mlu_tensor(),
                               this->beta_->mlu_tensor()));
-  MLU_CHECK(cnmlBindConstData(this->alpha_->mlu_tensor(),
-                              this->alpha_->cpu_tensor(),
-                              this->alpha_->mutable_cpu_data()));
-  MLU_CHECK(cnmlBindConstData(this->beta_->mlu_tensor(),
-                              this->beta_->cpu_tensor(),
-                              this->beta_->mutable_cpu_data()));
+  MLU_CHECK(cnmlBindConstData_V2(this->alpha_->mlu_tensor(),
+                              this->alpha_->sync_data(),
+                              false));
+  MLU_CHECK(cnmlBindConstData_V2(this->beta_->mlu_tensor(),
+                              this->beta_->sync_data(),
+                              false));
   if (this->power_ != 1) {
     MLU_CHECK(cnmlCreatePowerOp(&power_op_ptr_,
                                 this->temp_->mlu_tensor(),
@@ -123,31 +124,33 @@ template <typename Dtype>
 void MLUPowerLayer<Dtype>::MLUCompileOp() {
   MLU_CHECK(cnmlCompileBaseOp(scale_op_ptr_,
                               Caffe::rt_core(),
-                              Caffe::model_parallel()));
+                              Caffe::core_number()));
   if (this->power_ != 1)
     MLU_CHECK(cnmlCompileBaseOp(power_op_ptr_,
                                 Caffe::rt_core(),
-                                Caffe::model_parallel()));
+                                Caffe::core_number()));
 }
 
 template <typename Dtype>
 void MLUPowerLayer<Dtype>::Forward_mlu(const vector<Blob<Dtype>*>& bottom,
-    const vector<Blob<Dtype>*>& top) {
+                                       const vector<Blob<Dtype>*>& top) {
   MLU_CHECK(cnmlComputeScaleOpForward_V3(scale_op_ptr_,
-                                      bottom[0]->mutable_mlu_data(),
-                                      this->power_ == 1 ?
-                                      top[0]->mutable_mlu_data() :
-                                      this->temp_->mutable_mlu_data(),
-                                      Caffe::forward_param(),
-                                      Caffe::queue()));
+                                         bottom[0]->mutable_mlu_data(),
+                                         this->power_ == 1 ?
+                                         top[0]->mutable_mlu_data() :
+                                         this->temp_->mutable_mlu_data(),
+                                         Caffe::forward_param(),
+                                         Caffe::queue()));
   if (this->power_ != 1) {
     MLU_CHECK(cnmlComputePowerOpForward_V3(power_op_ptr_,
-                                        this->temp_->mutable_mlu_data(),
-                                        top[0]->mutable_mlu_data(),
-                                        Caffe::forward_param(),
-                                        Caffe::queue()));
+                                           this->temp_->mutable_mlu_data(),
+                                           top[0]->mutable_mlu_data(),
+                                           Caffe::forward_param(),
+                                           Caffe::queue()));
   }
 }
+
 INSTANTIATE_CLASS(MLUPowerLayer);
+
 }  //  namespace caffe
 #endif  //  USE_MLU

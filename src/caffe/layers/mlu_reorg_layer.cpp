@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -29,23 +29,22 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #ifdef USE_MLU
 #include <vector>
-
 #include "caffe/layers/mlu_reorg_layer.hpp"
 
 namespace caffe {
 
 template <typename Dtype>
 void MLUReorgLayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& bottom,
-      const vector<Blob<Dtype>*>& top) {
+                                      const vector<Blob<Dtype>*>& top) {
   ReorgLayer<Dtype>::LayerSetUp(bottom, top);
 }
 
 template <typename Dtype>
 void MLUReorgLayer<Dtype>::Reshape_tensor(const vector<Blob<Dtype>*>& bottom,
-                                         const vector<Blob<Dtype>*>& top) {
+                                          const vector<Blob<Dtype>*>& top) {
   CHECK(bottom.size() == 1 && top.size() == 1);
   BaseDataType cpu_dtype = sizeof(Dtype) == 4 ? DT_FLOAT32 : DT_DOUBLE;
-  BaseDataType mlu_dtype = DT_FLOAT16;
+  BaseDataType mlu_dtype = bottom[0]->mlu_type();
   top[0]->Reshape(bottom[0]->num(), this->reorged_channels_,
                   this->reorged_height_, this->reorged_width_,
                   cpu_dtype, mlu_dtype, CNML_TENSOR);
@@ -61,9 +60,8 @@ void MLUReorgLayer<Dtype>::MLUDestroyOp() {
 }
 
 template <typename Dtype>
-void MLUReorgLayer<Dtype>::MLUCreateOpBindData(
-                                      const vector<Blob<Dtype>*>& bottom,
-                                      const vector<Blob<Dtype>*>& top) {
+void MLUReorgLayer<Dtype>::MLUCreateOpBindData(const vector<Blob<Dtype>*>& bottom,
+                                               const vector<Blob<Dtype>*>& top) {
   MLU_CHECK(cnmlCreateReorgOpParam(&param,
                                    this->stride_,
                                    this->stride_,
@@ -82,9 +80,6 @@ void MLUReorgLayer<Dtype>::MLUCreateOpBindData(
       bottom[0]->set_mlu_scale(
         this->layer_param_.bottom_mlu_dtype(0).scale(0));
     }
-    cnmlEnableReorgOpInt8Mode(reorg_op_ptr_,
-      bottom[0]->mlu_position(),
-      bottom[0]->mlu_scale());
   }
 }
 
@@ -92,7 +87,7 @@ template <typename Dtype>
 void MLUReorgLayer<Dtype>::MLUCompileOp() {
   MLU_CHECK(cnmlCompileBaseOp(reorg_op_ptr_,
                               Caffe::rt_core(),
-                              Caffe::model_parallel()));
+                              Caffe::core_number()));
 }
 
 template <typename Dtype>
@@ -104,9 +99,9 @@ template <typename Dtype>
 void MLUReorgLayer<Dtype>::Forward_mlu(const vector<Blob<Dtype>*>& bottom,
                                        const vector<Blob<Dtype>*>& top) {
   MLU_CHECK(cnmlComputeReorgOpForward_V3(reorg_op_ptr_,
-                                      bottom[0]->mutable_mlu_data(),
-                                      top[0]->mutable_mlu_data(),
-                                      Caffe::forward_param(), Caffe::queue()));
+                                         bottom[0]->mutable_mlu_data(),
+                                         top[0]->mutable_mlu_data(),
+                                         Caffe::forward_param(), Caffe::queue()));
 }
 
 INSTANTIATE_CLASS(MLUReorgLayer);

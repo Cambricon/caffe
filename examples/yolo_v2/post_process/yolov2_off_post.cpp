@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -41,6 +41,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "off_runner.hpp"
 #include "command_option.hpp"
 #include "common_functions.hpp"
+#include "threadPool.h"
 
 using std::vector;
 using std::string;
@@ -49,24 +50,38 @@ template<typename Dtype, template <typename> class Qtype>
 void YoloV2OffPostProcessor<Dtype, Qtype>::runParallel() {
   OffRunner<Dtype, Qtype> * infr = static_cast<OffRunner<Dtype, Qtype>*>(this->runner_);
   setDeviceId(infr->deviceId());
-  cnrtSetCurrentChannel((cnrtChannelType_t)(this->threadId_ % 4));
 
   this->readLabels(&this->label_to_display_name);
 
   outCpuPtrs_ = new(Dtype);
-  outCpuPtrs_[0] = new float[infr->outCount()];
+  outCpuPtrs_[0] = new float[infr->outCounts()[0]];
+  syncCpuPtrs_ = new(Dtype);
+  syncCpuPtrs_[0] = new char[infr->outputSizeArray()[0]];
+
+  int TASK_NUM = SimpleInterface::thread_num;
+  std::vector<std::future<void>> futureVector;
+  int dim_values[4] = {infr->outNum(), infr->outHeight(),
+    infr->outWidth(), infr->outChannel()};
+  int dim_order[4] = {0, 3, 1, 2};
 
   while (true) {
     Dtype* mluOutData = infr->popValidOutputData();
     if (mluOutData == nullptr) break;  // no more work
 
     Timer copyout;
-    CNRT_CHECK(cnrtMemcpyBatchByDescArray(outCpuPtrs_,
-                                          mluOutData,
-                                          infr->outDescs(),
-                                          1,
-                                          infr->dataParallel(),
-                                          CNRT_MEM_TRANS_DIR_DEV2HOST));
+    CNRT_CHECK(cnrtMemcpy(syncCpuPtrs_[0], mluOutData[0],
+                          infr->outputSizeArray()[0],
+                          CNRT_MEM_TRANS_DIR_DEV2HOST));
+    cnrtDataType_t cpuDtype = CNRT_FLOAT32;
+    cnrtDataType_t mluDtype = infr->mluOutputDtype()[0];
+    if (mluDtype != cpuDtype) {
+      CNRT_CHECK(cnrtTransOrderAndCast(syncCpuPtrs_[0], mluDtype,
+            outCpuPtrs_[0], cpuDtype,
+            nullptr, 4, dim_values, dim_order));
+    } else {
+      CNRT_CHECK(cnrtTransDataOrder(syncCpuPtrs_[0], cpuDtype,
+            outCpuPtrs_[0], 4, dim_values, dim_order));
+    }
     copyout.log("copyout time ...");
 
     infr->pushFreeOutputData(mluOutData);
@@ -78,11 +93,38 @@ void YoloV2OffPostProcessor<Dtype, Qtype>::runParallel() {
 
     if (FLAGS_dump) {
       Timer dumpTimer;
-      this->WriteVisualizeBBox_offline(imgs, boxes,
-        this->label_to_display_name, img_names);
+      const int size = imgs.size();
+      if (TASK_NUM > size)
+        TASK_NUM = size;
+      const int delta = size / TASK_NUM;
+      int from = 0;
+      int to = delta;
+      for (int i = 0; i < TASK_NUM; i++) {
+        from = delta * i;
+        if (i == TASK_NUM - 1) {
+          to = size;
+        } else {
+          to = delta * (i + 1);
+        }
+
+        auto func = tp_->add([](const vector<cv::Mat>& imgs,
+               const vector<vector<float> >& boxes,
+               const vector<string>& label_to_display_name,
+               const vector<string>& img_names, const int& from,
+               const int& to, YoloV2Processor<Dtype, Qtype>* object) {
+          object->WriteVisualizeBBox_offline(imgs, boxes,
+              label_to_display_name, img_names, from, to);
+        }, imgs, boxes, this->label_to_display_name,
+        img_names, from, to, this);
+
+        futureVector.push_back(std::move(func));
+      }
       dumpTimer.log("dump imgs time ...");
     }
     postProcess.log("post process time ...");
+  }
+  for (int i = 0; i < futureVector.size(); i++) {
+    futureVector[i].get();
   }
 }
 
@@ -94,27 +136,38 @@ void YoloV2OffPostProcessor<Dtype, Qtype>::runSerial() {
     this->readLabels(&this->label_to_display_name);
 
     outCpuPtrs_ = new(Dtype);
-    outCpuPtrs_[0] = new float[infr->outCount()];
+    outCpuPtrs_[0] = new float[infr->outCounts()[0]];
+    syncCpuPtrs_ = new(Dtype);
+    syncCpuPtrs_[0] = new char[infr->outputSizeArray()[0]];
 
     this->initSerialMode = true;
   }
 
   Dtype* mluOutData = infr->popValidOutputData();
-  CNRT_CHECK(cnrtMemcpyBatchByDescArray(outCpuPtrs_,
-                                        mluOutData,
-                                        infr->outDescs(),
-                                        1,
-                                        1,
-                                        CNRT_MEM_TRANS_DIR_DEV2HOST));
+  int dim_values[4] = {infr->outNum(), infr->outHeight(),
+      infr->outWidth(), infr->outChannel()};
+  int dim_order[4] = {0, 3, 1, 2};
+  CNRT_CHECK(cnrtMemcpy(syncCpuPtrs_[0], mluOutData[0],
+                        infr->outputSizeArray()[0],
+                        CNRT_MEM_TRANS_DIR_DEV2HOST));
+  cnrtDataType_t cpuDtype = CNRT_FLOAT32;
+  cnrtDataType_t mluDtype = infr->mluOutputDtype()[0];
+  if (cpuDtype != mluDtype) {
+    CNRT_CHECK(cnrtTransOrderAndCast(syncCpuPtrs_[0], mluDtype,
+          outCpuPtrs_[0], cpuDtype,
+          nullptr, 4, dim_values, dim_order));
+  } else {
+    CNRT_CHECK(cnrtTransDataOrder(syncCpuPtrs_[0], cpuDtype,
+          outCpuPtrs_[0], 4, dim_values, dim_order));
+  }
   infr->pushFreeOutputData(mluOutData);
 
   vector<cv::Mat> imgs;
   vector<string> img_names;
   vector<vector<float> > boxes = getResults(&imgs, &img_names);
-
   if (FLAGS_dump) {
     this->WriteVisualizeBBox_offline(imgs, boxes,
-             this->label_to_display_name, img_names);
+             this->label_to_display_name, img_names, 0, imgs.size());
   }
 }
 
@@ -131,7 +184,6 @@ vector<vector<float> > YoloV2OffPostProcessor<Dtype, Qtype>::getResults(
   float* data = reinterpret_cast<float*>(outCpuPtrs_[0]);
   vector<vector<float> > boxes = this->detection_out(data, outN, outC,
                                                      outH, outW);
-
   auto&& origin_img = infr->popValidInputNames();
   for (auto& img_name : origin_img) {
     if (img_name != "null") {
@@ -147,7 +199,6 @@ vector<vector<float> > YoloV2OffPostProcessor<Dtype, Qtype>::getResults(
       img_names->push_back(file_name);
     }
   }
-
   return boxes;
 }
 

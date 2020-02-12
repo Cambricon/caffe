@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -39,7 +39,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 namespace caffe {
 
 /**
- * @brief This is a math Operation to sqrt the input data.
+ * @brief MLU acceleration of SqrtLayer
+ *        This is a math Operation to sqrt the input data.
  */
 template <typename Dtype>
 class MLUSqrtLayer : public SqrtLayer <Dtype> {
@@ -59,13 +60,12 @@ class MLUSqrtLayer : public SqrtLayer <Dtype> {
   virtual void MLUCompileOp() {
     MLU_CHECK(cnmlCompileBaseOp(sqrt_op_ptr_,
                                 Caffe::rt_core(),
-                                Caffe::model_parallel()));
+                                Caffe::core_number()));
   }
   virtual void Forward_mlu(const vector<Blob<Dtype>*>& bottom,
                            const vector<Blob<Dtype>*>& top);
   cnmlBaseOp_t sqrt_op_ptr_;
 };
-
 }  // namespace caffe
 #endif  // USE_MLU
 #endif  // INCLUDE_CAFFE_LAYERS_MLU_SQRT_LAYER_HPP_

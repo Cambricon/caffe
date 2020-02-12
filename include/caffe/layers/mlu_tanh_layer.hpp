@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2018-2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -29,7 +29,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #ifndef INCLUDE_CAFFE_LAYERS_MLU_TANH_LAYER_HPP_
 #define INCLUDE_CAFFE_LAYERS_MLU_TANH_LAYER_HPP_
-
 #ifdef USE_MLU
 
 #include <vector>
@@ -45,14 +44,11 @@ namespace caffe {
 
 /**
  * @brief MLU acceleration of TanHLayer
+ *        param provides Layerparamter. It has no paramter for now.
  */
 template <typename Dtype>
 class MLUTanHLayer : public TanHLayer<Dtype> {
   public:
-  /**
-   *@brief param provides Layerparamter. It has no paramter for now.
-   *
-   */
   explicit MLUTanHLayer(const LayerParameter& param)
       : TanHLayer<Dtype>(param), tanh_active_op_ptr_(nullptr) {}
   virtual void Reshape_tensor(const vector<Blob<Dtype>*>& bottom,
@@ -94,9 +90,7 @@ class MLUTanHLayer : public TanHLayer<Dtype> {
 
   cnmlBaseOp_t tanh_active_op_ptr_;
 };
-
 }  // namespace caffe
-
 #endif  // USE_MLU
 #endif  // INCLUDE_CAFFE_LAYERS_MLU_TANH_LAYER_HPP_
 

@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -34,12 +34,9 @@ DEFINE_string(model, "",
 DEFINE_string(weights, "",
     "Optional; the pretrained weights to initialize finetuning, "
     "separated by ','. Cannot be set simultaneously with snapshot.");
-DEFINE_int32(modelparallel, 1,
-    "model parallel means one model runs in multicores");
+DEFINE_int32(batchsize, 1, "Read images size every batch for inference");
+DEFINE_int32(core_number, 1, "The number of cores are used for inference");
 DEFINE_string(mmode, "MFUS", "MLU or MFUS, MLU mode");
 DEFINE_string(mcore, "MLU100",
     "1H8, 1H16, MLU100 for different Cambricon hardware pltform");
-DEFINE_string(datastrategy, "-1,-1",
-    "Use it to control input and output data_strategy"
-    " 0: cpu_mlu_balance; 1: cpu_priority; "
-    " 2: mlu_priority;    3: no_preprocess ");
+DEFINE_int32(opt_level, 1, "Optimized the model.");

@@ -1,8 +1,8 @@
 /*
-All modification made by Cambricon Corporation: © 2018 Cambricon Corporation
+All modification made by Cambricon Corporation: © 2019 Cambricon Corporation
 All rights reserved.
 All other contributions:
-Copyright (c) 2014--2018, the respective contributors
+Copyright (c) 2014--2019, the respective contributors
 All rights reserved.
 For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
 Redistribution and use in source and binary forms, with or without
@@ -34,9 +34,11 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 DECLARE_string(offlinemodel);
 DECLARE_string(meanfile);
 DECLARE_string(meanvalue);
-DECLARE_int32(dataparallel);
-DECLARE_int32(modelparallel);
+DECLARE_int32(core_number);
+DECLARE_int32(batchsize);
 DECLARE_int32(threads);
+DECLARE_int32(channel_dup);
+DECLARE_int32(simple_compile);
 DECLARE_string(images);
 DECLARE_string(labels);
 DECLARE_int32(fix8);
@@ -48,7 +50,6 @@ DECLARE_string(weights);
 DECLARE_int32(dump);
 DECLARE_string(mmode);
 DECLARE_string(mcore);
-DECLARE_string(datastrategy);
 DECLARE_int32(fifosize);
 DECLARE_double(confidencethreshold);
 DECLARE_string(outputdir);
@@ -58,5 +59,9 @@ DECLARE_string(outputdir);
 DECLARE_string(mludevice);
 DECLARE_int32(apiversion);
 DECLARE_string(functype);
+DECLARE_int32(Bangop);
+DECLARE_int32(preprocess_option);
+DECLARE_string(output_dtype);
+DECLARE_int32(opt_level);
 
 #endif  // EXAMPLES_COMMON_INCLUDE_COMMAND_OPTION_HPP_
