@@ -235,6 +235,8 @@ int main(int argc, char** argv) {
     save_model_path = pt.get<string>("model.save_model_path");
     boost::optional<string> img_folder_path =
         pt.get_optional<string>("data.images_folder_path");
+    boost::optional<string> img_list_path =
+        pt.get_optional<string>("data.images_list_path");
     boost::optional<string> img_db_path = pt.get_optional<string>("data.images_db_path");
     boost::optional<int> used_img_num = pt.get_optional<int>("data.used_images_num");
     if (used_img_num) {
@@ -321,7 +323,22 @@ int main(int argc, char** argv) {
 
     // substitute net_param
     LayerParameter* layer_param = net_param1.add_layer();
-    if (!img_db_path) {
+    if (img_list_path) {
+      CreateInputLayer(
+          layer_param,
+          n,
+          c,
+          h,
+          w,
+          "ImageData",
+          img_list_path.get(),
+          crop[0],
+          name,
+          mean_value,
+          std_,
+          use_firstconv_);
+
+    } else if (img_folder_path) {
       CreateInputLayer(
           layer_param,
           n,
