@@ -65,8 +65,8 @@ DEFINE_string(
     mode,
     "common",
     "Optional; determine which mode to generate quantized pt, "
-    "common: position + scale(default); scale: only scale;"
-    "int8_channel: channel quantize + scales");
+    "common: position"
+    );
 DEFINE_int32(iterations, 1,
     "Optional; determine to read images iterations ");
 DEFINE_string(blobs_dtype, "INT8", "Set the quantized data type."
